@@ -31,6 +31,11 @@ DEFAULT_ITEM_CONFIG = {
 	"odv_default" : "cis_lvl1"
 }
 
+# to do:
+# - yaml can also be yml
+# - allow baseline file in current dir if named
+# - name prefix / suffix as option and in config
+
 # ----------------------------------------
 #            Path Navigation
 # ----------------------------------------
@@ -254,7 +259,7 @@ def create_munki_item(rule, name, output_path, config, odv_level_items, custom_p
 		for key in metadata:
 			if metadata[key] == "today":
 				metadata[key] = datetime.datetime.now()
-		item["metadata"] = metadata
+		item["_metadata"] = metadata
 	item["name"] = name
 	# non static keys
 	if "fields_from_rule" in config:
@@ -397,7 +402,7 @@ def create_bash_fix_str(fix, rule_name, item, indent=False):
 	return result
 
 def write_munki_item(name, item):
-	item_path = os.path.join(OUTPUT_PATH, f"{name.replace('_', '-')}.xml")
+	item_path = os.path.join(OUTPUT_PATH, f"{name.replace('_', '-')}.plist")
 	# open file
 	with open(item_path, "wb+") as fp:
 		try:
@@ -553,9 +558,9 @@ def process_options():
 	parser.add_option('--custom', '-c', dest='custom',
 						help='Optional path to custom folder.')
 	parser.add_option('--rules', '-r', dest='rules',
-						help='Specifies path to the folder of rules.')
+						help='Optional path to rules folder.')
 	parser.add_option('--folder', '-f', dest='folder',
-						help='Optional path to a folder containing optitonally containing a baselines, custom and rules folder. These folders will be used if paths are not directly specified.')
+						help='Optional path to a folder optionally containing a baselines, custom and rules folder. These folders will be used if paths are not directly specified.')
 	parser.add_option('--config', '-y', dest='config_file',
 						help=f'Optional path to the configuration yaml file, which specifies values for the munki item. Defaults to {CONFIG_PATH}')
 	parser.add_option('--munki', '-m', dest='output_path',

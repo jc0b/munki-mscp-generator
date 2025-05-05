@@ -1,13 +1,13 @@
 ---
-  fields_from_rule :
-    display_name : "title"
-    description : "discussion"
-  static_fields:
-    category : "Compliance"
-  metadata:
-    created_by: "munki-mscp-generator"
-    creation_date: "today"
-  odv_default : cis_lvl1
-  odv_level :
-    recommended : 
-      - "audit_acls_files_configure"
+fields_from_rule:
+  display_name: "title"
+  description: "discussion"
+static_fields:
+  category: "Compliance"
+metadata:
+  created_by: "munki-mscp-generator"
+  creation_date: "today"
+odv_default: "cis_lvl1"
+odv_level:
+  recommended: 
+    - "audit_acls_files_configure"
