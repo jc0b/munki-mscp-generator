@@ -563,20 +563,13 @@ def process_options():
 						help='Optional path to a folder optionally containing a baselines, custom and rules folder. These folders will be used if paths are not directly specified.')
 	parser.add_option('--config', '-y', dest='config_file',
 						help=f'Optional path to the configuration yaml file, which specifies values for the munki item. Defaults to {CONFIG_PATH}')
-	parser.add_option('--munki', '-m', dest='output_path',
-						help=f'Optional path to the directory generated munki files should be written to, defaults to {OUTPUT_PATH}')
+	parser.add_option('--munki', '-m', dest='output_path', default=OUTPUT_PATH,
+						help=f'Optional path to the directory generated munki files should be written to. Defaults to {OUTPUT_PATH}')
 	parser.add_option('--preinstall', '-p', dest='separate_fix', action='store_true',
 						help='Write fix script in preinstall_script, rather than in installcheck_script.')
-	# parser.add_option('--slack', '-s', dest='slack_url',
-	# 					help=f'Optional url for Slack webhooks.')
 	parser.add_option('--markdown', dest='markdown_path', default=MD_PATH,
-						help=f'Optional file name to print markdown summary of how the rules were processed by this script.')
+						help=f'Optional file name to print markdown summary of how the rules were processed by this script. Defaults to {MD_PATH}')
 	options, _ = parser.parse_args()
-	# check if slack url in env
-	# slack_url = options.slack_url
-	# if (not slack_url) and os.environ.get("SLACK_WEBHOOK"):
-	# 	slack_url = os.environ.get("SLACK_WEBHOOK")
-	# return based on config file option
 	return options.baseline_path, options.baseline_name, options.custom, options.rules, options.folder, options.config_file, options.output_path, options.separate_fix, options.markdown_path
 
 
@@ -590,8 +583,6 @@ def main():
 	config = get_config(config_path)
 	odv_level_items = get_all_items_odv_level(config)
 
-	if not output_path:
-		output_path = OUTPUT_PATH
 	prep_munki_item_dir(output_path)
 
 	if baseline_path:
