@@ -31,11 +31,6 @@ DEFAULT_ITEM_CONFIG = {
 	"odv_default" : "cis_lvl1"
 }
 
-# to do:
-# - yaml can also be yml
-# - allow baseline file in current dir if named
-# - name prefix / suffix as option and in config
-
 # ----------------------------------------
 #            Path Navigation
 # ----------------------------------------
@@ -113,13 +108,22 @@ def get_custom_path(custom_path, folder_path):
 def get_baseline_path(baseline_path, baseline_name, folder_path):
 	original_path = baseline_path
 	# if no baseline path given check if we can make it
+	# can be in given folder, baseline folder, or current directory
 	if not baseline_path:
 		if folder_path:
 			baseline_path = os.path.join(folder_path, "baselines")
-		else:
+		elif os.path.exists("baselines"):
 			baseline_path = "baselines"
-		if baseline_name and (not baseline_name.endswith(".yaml")):
-			baseline_name += ".yaml"
+		elif baseline_name:
+			baseline_path = ""
+		else:
+			logging.warning(f"No custom baseline file provided. Munki items will be generated for all rules provided.")
+			baseline_path = None
+		if baseline_name and (not (baseline_name.endswith(".yaml" or baseline_name.endswith(".yml")))):
+			if not os.path.exists(baseline_path + ".yaml"):
+				baseline_name += ".yml"
+			else:
+				baseline_name += ".yaml"
 		if not os.path.exists(baseline_path):
 			# no baselines subdirectory found
 			if baseline_name:
@@ -143,7 +147,7 @@ def get_baseline_path(baseline_path, baseline_name, folder_path):
 					sys.exit(1)
 			else:
 				# have directory, if it countains only one file use that file
-				file_names = [file_name for file_name in os.listdir(baseline_path) if file_name.endswith(".yaml")]
+				file_names = [file_name for file_name in os.listdir(baseline_path) if (file_name.endswith(".yaml") or file_name.endswith(".yml"))]
 				if len(file_names) == 1:
 					baseline_path = os.path.join(baseline_path, file_names[0])
 				elif len(file_names) == 0:
@@ -178,12 +182,15 @@ def get_baseline_profile(baseline, baseline_path) -> list:
 #              Rules
 # ----------------------------------------
 def find_rule(rule_name, rules_folder, looking_for_custom=False):
-	# add extension if missing
-	if not rule_name.endswith(".yaml"):
-			rule_name += ".yaml"
-	# find location of rule
 	rules_path = pathlib.Path(rules_folder)
-	files = list(rules_path.rglob(rule_name))
+	files = []
+	# add extension if missing
+	# find location of rule
+	if not (rule_name.endswith(".yaml") or rule_name.endswith(".yml")):
+			files += list(rules_path.rglob(rule_name + ".yaml"))
+			files += list(rules_path.rglob(rule_name + ".yml"))
+	else:
+		files += list(rules_path.rglob(rule_name))
 	# check that rule exists in exactly one location
 	if len(files) < 1:
 		if looking_for_custom:
@@ -211,7 +218,9 @@ def process_rule(rule_name, rules_folder, output_path, config, odv_level_items, 
 
 def get_all_rules(rules_folder):
 	rules_path = pathlib.Path(rules_folder)
-	return list(rules_path.rglob("*.yaml"))
+	result = list(rules_path.rglob("*.yaml"))
+	result += list(rules_path.rglob("*.yml"))
+	return result
 
 def process_all_rules(rules_folder, output_path, config, odv_level_items, custom_path, separate_fix, script_summary):
 	rule_paths = get_all_rules(rules_folder)
@@ -227,7 +236,12 @@ def rule_has_fix(rule, name, script_summary):
 		fix = rule["fix"].rstrip("\n")
 		lines = fix.splitlines()
 		if "source" in lines[0]:
-			script_summary["items_made"].append(name)
+			chunks = rule["fix"].split("----")
+			if len(chunks) > 2:
+				note = "----".join(chunks[2:]).lstrip(" \n").rstrip(" \n")
+				script_summary["items_made"].append((name, note))
+			else:
+				script_summary["items_made"].append((name, None))
 			return True
 		else:
 			# Fix must be impolemented outside of a munki item. Item is skipped.
@@ -276,7 +290,7 @@ def create_munki_item(rule, name, output_path, config, odv_level_items, custom_p
 	else:
 		add_check_and_fix_to_installcheck(item, rule, name, custom)
 	# write
-	write_munki_item(name, item)
+	write_munki_item(get_munki_item_name(name, config), output_path, item)
 
 def get_custom(rule, name, custom_path, odv_level_items, config):
 	custom = None
@@ -369,40 +383,42 @@ def create_bash_compare_str(result_dict, rule_name):
 
 def create_bash_fix_str(fix, rule_name, item, indent=False):
 	result = ""
-	fix = fix.rstrip("\n")
-	lines = fix.splitlines()
-	# check if there are notes
-	for i, line in enumerate(lines):
-		if i > 2 and line == "----" and i < len(lines) -1:
-			note = "\n".join(lines[i+1:]).lstrip(" \n").rstrip(" \n")
-			# add note to item
-			if "notes" in item:
-				item["notes"] = item["notes"] + "\n\n" + note
-			else:
-				item["notes"] = note
-			# warn
-			# logging.info(f"Note for item {rule_name}\n\t{note}")
-			# remove line
-			lines = lines[:i+1]
-			fix = "\n".join(lines).rstrip("\n")
-	# remove expected prefix and suffix from code
-	prefix = "[source,bash]\n----\n"
-	suffix = "\n----"
-	if fix.startswith(prefix) and fix.endswith(suffix):
-		fix = fix[len(prefix) : - len(suffix)]
+	fix = fix.rstrip(" \n")
+	chunks = fix.split("----")
+	# check source
+	if chunks[0].lstrip(" \n").rstrip(" \n") == "[source,bash]":
+		fix = chunks[1]
+		if fix.startswith("\n"):
+			fix = fix[1:]
 		# add code to string
 		for line in fix.splitlines():
 			if indent:
 				result +="\t"
 			result += f"{line}\n"
 	else:
-		print(fix)
 		logging.error(f"Fix for rule {rule_name} not formatted as expected, so cannot be processed by this script.")
+		logging.error("Fix:")
+		logging.error(fix)
 		sys.exit(1)
+	# check if there are notes
+	if len(chunks) > 2:
+		note = "----".join(chunks[2:]).lstrip(" \n").rstrip(" \n")
+		if note.startswith("NOTE"):
+			note = note[len("NOTE"):]
+		note = note.lstrip(" :-")
+		# add note to item
+		if "notes" in item:
+			item["notes"] = item["notes"] + "\n\n" + note
+		else:
+			item["notes"] = note
+		# warn
+		# logging.info(f"Note for item {rule_name}\n\t{note}")
+	lines = fix.splitlines()
+	# check if there are notes
 	return result
 
-def write_munki_item(name, item):
-	item_path = os.path.join(OUTPUT_PATH, f"{name.replace('_', '-')}.plist")
+def write_munki_item(name, output_path, item):
+	item_path = os.path.join(output_path, name)
 	# open file
 	with open(item_path, "wb+") as fp:
 		try:
@@ -417,6 +433,14 @@ def write_munki_item(name, item):
 			logging.error(e, exc_info=True)
 			sys.exit(1)
 
+def get_munki_item_name(name, config):
+	name = name.replace('_', '-')
+	if "prefix" in config:
+		name = config["prefix"] + name
+	if "suffix" in config:
+		name += config["suffix"]
+	return name + ".plist"
+
 def prep_munki_item_dir(folder_path):
 	if not os.path.exists(folder_path):
 		# make dir
@@ -427,7 +451,7 @@ def prep_munki_item_dir(folder_path):
 # ----------------------------------------
 #                Config 
 # ----------------------------------------
-def get_config(config_path):
+def get_config(config_path, prefix, suffix):
 	if config_path:
 		# file specified 
 		if not os.path.exists(config_path):
@@ -445,14 +469,15 @@ def get_config(config_path):
 	if not result:
 		result = dict()
 	check_config(result)
+	format_prefix_suffix(result, prefix, suffix)
 	return result
 
 def check_config(config):
 	if type(config) == dict:
 		keys = config.keys()
-		if set(keys).issubset({"fields_from_rule", "static_fields", "metadata", "odv_default", "odv_level"}):
+		if set(keys).issubset({"fields_from_rule", "static_fields", "metadata", "odv_default", "odv_level", "prefix", "suffix"}):
 			for key in keys:
-				if key == "odv_default":
+				if key in ["odv_default", "prefix", "suffix"]:
 					if type(config[key]) != str:
 						logging.error(f"Unexpected format of config file. {key} is expected to be type string but is type {type(config[key])}. Please update config file.")
 						sys.exit(1)
@@ -465,7 +490,7 @@ def check_config(config):
 							logging.error(f"Unexpected format of config file. {key} is expected to be type list but is type {type(config['odv_level'][key])}. Please update config file.")
 							sys.exit(1)
 		else:
-			logging.error(f'Unknown key in config file. Only keys "fields_from_rule", "static_fields", and "metadata" are exoected. Please update config file.')
+			logging.error(f'Unknown key(s) in config file: {str(set(keys).difference({"fields_from_rule", "static_fields", "metadata", "odv_default", "odv_level", "prefix", "suffix"}))[1 : -1]}. Please update config file.')
 			sys.exit(1)
 	else:
 		logging.error(f"Unexpected format of config file. Expected file in the format of dictionary, but indtead file is formatted as {type(config)}. Please update config file.")
@@ -480,6 +505,18 @@ def get_all_items_odv_level(config):
 				result[rule] = key
 	return result
 
+def format_prefix_suffix(config, prefix, suffix):
+	if prefix:
+		if "prefix" in config:
+			config["prefix"] = prefix + config["prefix"]
+		else:
+			config["prefix"] = prefix
+	if suffix:
+		if "suffix" in config:
+			config["suffix"] = config["suffix"] + suffix 
+		else:
+			config["suffix"] = suffix
+
 # ----------------------------------------
 #                Markdown
 # ----------------------------------------
@@ -492,15 +529,19 @@ def write_md_file(md_file, system_settings):
 		logging.info("Markdown file successfully updated.")
 	except Exception as e:
 		logging.error(f"Unable to write to {md_file}")
-		logging.error(e)
+		logging.error(e, exc_info=True)
 		sys.exit(1)
 
 
 def md_description(system_settings):
 	s = ""
 	if len(system_settings["items_made"]) > 0:
-		s += "Generated munki items for the following rules:\n- "
-		s += "\n- ".join(system_settings["items_made"])
+		s += "Generated munki items for the following rules:\n"
+		for name, note in system_settings["items_made"]:
+			s += f"- {name}\n"
+			if note:
+				s += "\n".join([f"\t{line}" for line in note.splitlines()])
+				s += "\n"
 		s += "\n\n"
 	else:
 		s += "No munki items generates.\n\n"
@@ -513,9 +554,9 @@ def md_description(system_settings):
 			s += "\n"
 		s += "\n\n"
 
-	if len(system_settings["items_made"]) > 0:
+	if len(system_settings["rules_no_fix"]) > 0:
 		s += "The following rules had no defined fix, so were skipped:\n- "
-		s += "\n- ".join(system_settings["items_made"])
+		s += "\n- ".join(system_settings["rules_no_fix"])
 		s += "\n\n"
 
 	return s
@@ -535,6 +576,7 @@ def read_yaml(file_path) -> dict:
 			return result
 		except yaml.YAMLError as e:
 			logging.error(f"Unable to load {file_path}")
+			logging.error(e, exc_info=True)
 			sys.exit(1)
 
 def setup_logging():
@@ -565,22 +607,26 @@ def process_options():
 						help=f'Optional path to the configuration yaml file, which specifies values for the munki item. Defaults to {CONFIG_PATH}')
 	parser.add_option('--munki', '-m', dest='output_path', default=OUTPUT_PATH,
 						help=f'Optional path to the directory generated munki files should be written to. Defaults to {OUTPUT_PATH}')
-	parser.add_option('--preinstall', '-p', dest='separate_fix', action='store_true',
+	parser.add_option('--prefix', dest='prefix',
+						help=f'Optional prefix to add to the name of every generated munki item.')
+	parser.add_option('--suffix', dest='suffix',
+						help=f'Optional suffix to add to the name of every generated munki item.')
+	parser.add_option('--seperate', '-s', dest='separate_fix', action='store_true',
 						help='Write fix script in preinstall_script, rather than in installcheck_script.')
 	parser.add_option('--markdown', dest='markdown_path', default=MD_PATH,
 						help=f'Optional file name to print markdown summary of how the rules were processed by this script. Defaults to {MD_PATH}')
 	options, _ = parser.parse_args()
-	return options.baseline_path, options.baseline_name, options.custom, options.rules, options.folder, options.config_file, options.output_path, options.separate_fix, options.markdown_path
+	return options.baseline_path, options.baseline_name, options.custom, options.rules, options.folder, options.config_file, options.output_path, options.prefix, options.suffix, options.separate_fix, options.markdown_path
 
 
 def main():
 	setup_logging()
-	baseline_path, baseline_name, custom_path, rules_path, folder_path, config_path, output_path, separate_fix, md_path = process_options()
+	baseline_path, baseline_name, custom_path, rules_path, folder_path, config_path, output_path, prefix, suffix, separate_fix, md_path = process_options()
 	baseline_path, custom_path, rules_path = get_all_input_paths(baseline_path, baseline_name, custom_path, rules_path, folder_path)
 
 	script_summary = {"items_made":[], "items_skipped":[], "rules_no_fix":[]}
 
-	config = get_config(config_path)
+	config = get_config(config_path, prefix, suffix)
 	odv_level_items = get_all_items_odv_level(config)
 
 	prep_munki_item_dir(output_path)
