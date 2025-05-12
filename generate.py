@@ -444,7 +444,7 @@ def get_munki_item_name(name, config):
 def prep_munki_item_dir(folder_path):
 	if not os.path.exists(folder_path):
 		# make dir
-		logging.info("Output path {folder_path} does not exist, so will be created.")
+		logging.info(f"Output path {folder_path} does not exist, so will be created.")
 		os.makedirs(folder_path)
 
 
