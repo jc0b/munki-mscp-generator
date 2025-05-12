@@ -409,7 +409,7 @@ def create_bash_fix_str(fix, rule_name, item, indent=False):
 		# add note to item
 		if "notes" in item:
 			item["notes"] = item["notes"] + "\n\n" + note
-		else:
+		elif note and note != "":
 			item["notes"] = note
 		# warn
 		# logging.info(f"Note for item {rule_name}\n\t{note}")
