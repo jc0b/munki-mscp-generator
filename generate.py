@@ -16,7 +16,7 @@ OUTPUT_PATH = "munki"
 
 SHEBANG = "#!/bin/bash\n"
 
-DEFAULT_ITEM_CONFIG = {
+DEFAULT_CONFIG = {
 	"fields_from_rule" : {
 		"title" : "display_name",
 		"discussion" : "description"
@@ -27,8 +27,7 @@ DEFAULT_ITEM_CONFIG = {
 	"metadata": {
 		"created_by": "munki-mscp-generator",
 		"creation_date": "today"
-	},
-	"odv_default" : "cis_lvl1"
+	}
 }
 
 # ----------------------------------------
@@ -480,14 +479,15 @@ def get_config(config_path, prefix, suffix, version):
 			# file specified but not there -> error: user provided file should exist
 			logging.error(f"Configuration file {config_path} is not present.")
 			sys.exit(1)
+		else:
+			result = read_yaml(config_path)
 	elif not os.path.exists(CONFIG_PATH):
 		# file was not user provided and was not there -> warning: use defauls
 		logging.warning("No configuration file is present. Will continue with default settings.")
 		result = DEFAULT_CONFIG
 	else:
 		logging.info(f"Using configuration file found at {CONFIG_PATH}.")
-		config_path = CONFIG_PATH
-	result = read_yaml(config_path)
+		result = read_yaml(CONFIG_PATH)
 	if not result:
 		result = dict()
 	check_config(result)
