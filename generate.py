@@ -18,8 +18,8 @@ SHEBANG = "#!/bin/bash\n"
 
 DEFAULT_CONFIG = {
 	"fields_from_rule" : {
-		"title" : "display_name",
-		"discussion" : "description"
+		"display_name" : "title",
+		"description" : "discussion"
 	},
 	"static_fields": {
 		"category" : "Compliance"
@@ -291,7 +291,7 @@ def create_munki_item(rule, name, output_path, config, odv_level_items, custom_p
 		item["_metadata"] = metadata
 	# version
 	if "version" in config:
-		munki_item_name_file_name += f"{config['delimeter']}{config['version']}"
+		munki_item_name_file_name += f"{config['delimiter']}{config['version']}"
 		item["version"] = str(config["version"])
 	# non static keys
 	if "fields_from_rule" in config:
@@ -455,7 +455,7 @@ def write_munki_item(name, output_path, item):
 			sys.exit(1)
 
 def get_munki_item_name(name, config):
-	name = name.replace('_', config["delimeter"])
+	name = name.replace('_', config["delimiter"])
 	if "prefix" in config:
 		name = config["prefix"] + name
 	if "suffix" in config:
@@ -492,16 +492,16 @@ def get_config(config_path, prefix, suffix, version):
 		result = dict()
 	check_config(result)
 	format_prefix_suffix(result, prefix, suffix, version)
-	if "delimeter" not in result:
-		result["delimeter"] = "-"
+	if "delimiter" not in result:
+		result["delimiter"] = "-"
 	return result
 
 def check_config(config):
 	if type(config) == dict:
 		keys = config.keys()
-		if set(keys).issubset({"fields_from_rule", "static_fields", "metadata", "odv_default", "odv_level", "prefix", "suffix", "version", "delimeter"}):
+		if set(keys).issubset({"fields_from_rule", "static_fields", "metadata", "odv_default", "odv_level", "prefix", "suffix", "version", "delimiter"}):
 			for key in keys:
-				if key in ["odv_default", "prefix", "suffix", "delimeter"]:
+				if key in ["odv_default", "prefix", "suffix", "delimiter"]:
 					if type(config[key]) != str:
 						logging.error(f"Unexpected format of config file. {key} is expected to be type string but is type {type(config[key])}. Please update config file.")
 						sys.exit(1)
@@ -623,9 +623,9 @@ def setup_logging():
 def process_options():
 	parser = optparse.OptionParser()
 	parser.set_usage('Usage: %prog [options]')
-	parser.add_option('--baseline_path', '-b', dest='baseline_path',
+	parser.add_option('--baseline-path', '-b', dest='baseline_path',
 						help='Optional path to custom baseline yaml file.')
-	parser.add_option('--baseline_name', '-n', dest='baseline_name',
+	parser.add_option('--baseline-name', '-n', dest='baseline_name',
 						help='Optional name of baseline yaml file.')
 	parser.add_option('--custom', '-c', dest='custom',
 						help='Optional path to custom folder.')
