@@ -186,6 +186,10 @@ def get_baseline_profile(baseline, baseline_path) -> list:
 		logging.error(f"Provided baseline file {baseline_path} contains no profile.")
 		sys.exit(1)
 
+def check_baseline_defaults(baseline, config):
+	if ("odv_default" not in config) and ("parent_values" in baseline):
+		config["odv_default"] = baseline["parent_values"]
+
 # ----------------------------------------
 #              Rules
 # ----------------------------------------
@@ -661,6 +665,7 @@ def main():
 
 	if baseline_path:
 		baseline = read_yaml(baseline_path)
+		check_baseline_defaults(baseline, config)
 		profile = get_baseline_profile(baseline, baseline_path)
 		for section in profile:
 			if "rules" not in section or type(section["rules"]) != list:
