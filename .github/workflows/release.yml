@@ -1,0 +1,26 @@
+name: 'Add artifacts to a release'
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release-artifacts:
+    name: 'Add artifacts to release'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ncipollo/release-action@v1
+        with:
+          allowUpdates: true
+          artifacts: "generate.py"
+          omitBodyDuringUpdate: true
+          omitDraftDuringUpdate: true
+          omitNameDuringUpdate: true
+          omitPrereleaseDuringUpdate: true
+          updateOnlyUnreleased: true
