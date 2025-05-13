@@ -292,7 +292,7 @@ def create_munki_item(rule, name, output_path, config, odv_level_items, custom_p
 	# version
 	if "version" in config:
 		munki_item_name_file_name += f"{config['delimeter']}{config['version']}"
-		item["version"] = config["version"]
+		item["version"] = str(config["version"])
 	# non static keys
 	if "fields_from_rule" in config:
 		for key in config["fields_from_rule"]:
@@ -643,7 +643,7 @@ def process_options():
 						help=f'Optional suffix to add to the name of every generated munki item and it\'s file name..')
 	parser.add_option('--version', '-v', dest='version',
 						help=f'Optional version to be set in every munki item and appended to the name of every generated munki item.')
-	parser.add_option('--seperate', '-s', dest='separate_fix', action='store_true',
+	parser.add_option('--separate', '-s', dest='separate_fix', action='store_true',
 						help='Write fix script in preinstall_script, rather than in installcheck_script.')
 	parser.add_option('--markdown', dest='markdown_path', default=MD_PATH,
 						help=f'Optional file name to print markdown summary of how the rules were processed by this script. Defaults to {MD_PATH}')
