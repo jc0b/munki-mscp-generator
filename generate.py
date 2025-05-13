@@ -97,7 +97,8 @@ def get_custom_path(custom_path, folder_path):
 			custom_path = "custom"
 		if not os.path.exists(custom_path):
 			# no custom subdirectory found
-			custom_path = None
+			logging.info(f"No custom directory found. Continuing without.")
+			return None
 	# if folder has rules subdirectory go there
 	if os.path.exists(os.path.join(custom_path, "rules")):
 		custom_path = os.path.join(custom_path, "rules")
@@ -114,21 +115,14 @@ def get_baseline_path(baseline_path, baseline_name, folder_path):
 			baseline_path = os.path.join(folder_path, "baselines")
 		elif os.path.exists("baselines"):
 			baseline_path = "baselines"
-		elif baseline_name:
-			baseline_path = ""
-		else:
+		elif not baseline_name:
 			logging.warning(f"No custom baseline file provided. Munki items will be generated for all rules provided.")
 			baseline_path = None
-		if baseline_name and (not (baseline_name.endswith(".yaml" or baseline_name.endswith(".yml")))):
-			if not os.path.exists(baseline_path + ".yaml"):
-				baseline_name += ".yml"
-			else:
-				baseline_name += ".yaml"
-		if not os.path.exists(baseline_path):
+		if baseline_path and (not os.path.exists(baseline_path)):
 			# no baselines subdirectory found
 			if baseline_name:
 				# specific name given: error file not found
-				logging.error(f"Expected custom baseline at {os.path.join(baseline_path, baseline_name)} but no such directory {baseline_path} was found.")
+				logging.error(f"Expected custom baseline named {baseline_name} in {baseline_path} but no such directory {baseline_path} was found.")
 				sys.exit(1)
 			else:
 				# no specific path or name given, fall to default
@@ -139,12 +133,26 @@ def get_baseline_path(baseline_path, baseline_name, folder_path):
 				baseline_path = None
 		else:
 			# baselines subdirectory found
+			# if name is given
 			if baseline_name:
-				# have direct path to file
-				baseline_path = os.path.join(baseline_path, baseline_name)
-				if not os.path.exists(baseline_path):
-					logging.error(f"Expected custom baseline at {baseline_path} but no such file was found.")
-					sys.exit(1)
+				if not baseline_path:
+					baseline_path = ""
+				if not (baseline_name.endswith(".yaml" or baseline_name.endswith(".yml"))):
+					baseline_name_1 = baseline_name + ".yaml"
+					baseline_path_1 = os.path.join(baseline_path, baseline_name_1)
+					baseline_name_2 = baseline_name + ".yaml"
+					baseline_path_2 = os.path.join(baseline_path, baseline_name_2)
+					if os.path.exists(baseline_path_1):
+						baseline_path = baseline_path_1
+					elif os.path.exists(baseline_path_2):
+						baseline_path = baseline_path_2
+					else:
+						if baseline_path == "":
+							baseline_path = "current directory"
+						logging.error(f"Expected custom baseline yaml file named {baseline_name} in {baseline_path} but no such file was found.")
+						sys.exit(1)
+				else:
+					baseline_path = os.path.join(baseline_path, baseline_name)
 			else:
 				# have directory, if it countains only one file use that file
 				file_names = [file_name for file_name in os.listdir(baseline_path) if (file_name.endswith(".yaml") or file_name.endswith(".yml"))]
@@ -154,7 +162,7 @@ def get_baseline_path(baseline_path, baseline_name, folder_path):
 					logging.warning(f"No path to a custom baseline file found in {baseline_path} so munki items will be generated for all rules provided.")
 					baseline_path = None
 				else:
-					logging.error(f"Multiple files found in {baseline_path} please specify the name of your custom baseline.")
+					logging.error(f"Multiple files found in {baseline_path}. Please specify the name of your custom baseline.")
 					sys.exit(1)
 	elif not os.path.exists(baseline_path):
 		logging.error(f"Custom baseline file {baseline_path} is not present.")
@@ -202,7 +210,7 @@ def find_rule(rule_name, rules_folder, looking_for_custom=False):
 		s = "rule"
 		if looking_for_custom:
 			s = "custom for rule"
-		logging.error(f"More than one {s} {rule_name} found, please make sure only one file exists per rule.")
+		logging.error(f"More than one {s} {rule_name} found. Please make sure only one file exists per rule.")
 		logging.error(f"Files found: {files}.")
 		sys.exit(1)
 	else:
@@ -303,7 +311,10 @@ def get_custom(rule, name, custom_path, odv_level_items, config):
 	custom = None
 	if "odv" in rule:
 		# check if custom
-		custom = find_rule(name, custom_path, looking_for_custom=True)
+		if custom_path:
+			custom = find_rule(name, custom_path, looking_for_custom=True)
+		else:
+			custom = None
 		if custom:
 			if "odv" in custom and "custom" in custom["odv"]:
 				custom = str(custom["odv"]["custom"])
@@ -470,7 +481,7 @@ def get_config(config_path, prefix, suffix, version):
 		logging.warning("No configuration file is present. Will continue with default settings.")
 		result = DEFAULT_CONFIG
 	else:
-		logging.info(f"Using default configuration file found at {CONFIG_PATH}.")
+		logging.info(f"Using configuration file found at {CONFIG_PATH}.")
 		config_path = CONFIG_PATH
 	result = read_yaml(config_path)
 	if not result:
