@@ -379,7 +379,7 @@ def create_bash_compare_str(result_dict, rule_name):
 		logging.error(f"Result for rule {rule_name} not formatted as expected, so cannot be processed by this script.")
 		sys.exit(1)
 	key = keys[0]
-	return f'if [[ $result_value == "{result_dict[key]}" ]]; then\n'
+	return f'if [[ $result_value != "{result_dict[key]}" ]]; then\n'
 
 def create_bash_fix_str(fix, rule_name, item, indent=False):
 	result = ""
