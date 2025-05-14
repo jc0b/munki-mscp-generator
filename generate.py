@@ -222,11 +222,11 @@ def find_rule(rule_name, rules_folder, looking_for_custom=False):
 	# read rule
 	return read_yaml(rules_path)
 
-def process_rule(rule_name, rules_folder, output_path, config, odv_level_items, custom_path, separate_fix, script_summary):
+def process_rule(rule_name, rules_folder, output_path, config, odv_level_items, custom_path, separate_fix, include_echo, script_summary):
 	rule = find_rule(rule_name, rules_folder)
 	rule_name = get_rule_name(rule_name, rule)
 	if rule_has_fix(rule, rule_name, script_summary):
-		create_munki_item(rule, rule_name, output_path, config, odv_level_items, custom_path, separate_fix)
+		create_munki_item(rule, rule_name, output_path, config, odv_level_items, custom_path, separate_fix, include_echo)
 
 def get_all_rules(rules_folder):
 	rules_path = pathlib.Path(rules_folder)
@@ -234,13 +234,13 @@ def get_all_rules(rules_folder):
 	result += list(rules_path.rglob("*.yml"))
 	return result
 
-def process_all_rules(rules_folder, output_path, config, odv_level_items, custom_path, separate_fix, script_summary):
+def process_all_rules(rules_folder, output_path, config, odv_level_items, custom_path, separate_fix, include_echo, script_summary):
 	rule_paths = get_all_rules(rules_folder)
 	for rule_path in rule_paths:
 		rule = read_yaml(rule_path)
 		rule_name = get_rule_name(rule_path, rule)
 		if rule_has_fix(rule, rule_name, script_summary):	
-			create_munki_item(rule, rule_name, output_path, rule_path, config, odv_level_items, custom_path, separate_fix)
+			create_munki_item(rule, rule_name, output_path, rule_path, config, odv_level_items, custom_path, separate_fix, include_echo)
 
 def rule_has_fix(rule, name, script_summary):
 	if "check" in rule and "result" in rule and "fix" in rule:
@@ -275,7 +275,7 @@ def get_rule_name(rule_path, rule):
 #              Munki Items
 # ----------------------------------------
 
-def create_munki_item(rule, name, output_path, config, odv_level_items, custom_path, separate_fix):
+def create_munki_item(rule, name, output_path, config, odv_level_items, custom_path, separate_fix, include_echo):
 	item = dict()
 	# custom
 	custom = get_custom(rule, name, custom_path, odv_level_items, config)
@@ -308,10 +308,10 @@ def create_munki_item(rule, name, output_path, config, odv_level_items, custom_p
 	else:
 		prefix_code = ""
 	if separate_fix:
-		add_check_to_installcheck(item, rule, name, custom, prefix_code)
-		add_fix_to_preinstall(item, rule, name, custom, prefix_code)
+		add_check_to_installcheck(item, rule, name, custom, prefix_code, include_echo)
+		add_fix_to_preinstall(item, rule, name, custom, prefix_code, include_echo)
 	else:
-		add_check_and_fix_to_installcheck(item, rule, name, custom, prefix_code)
+		add_check_and_fix_to_installcheck(item, rule, name, custom, prefix_code, include_echo)
 	# write
 	write_munki_item(munki_item_name_file_name + ".plist", output_path, item)
 
@@ -353,7 +353,7 @@ def add_to_item(item, rule, item_field, rule_field, custom):
 			value = value.replace("$ODV", custom)
 		item[item_field] = value
 
-def add_check_and_fix_to_installcheck(item, rule, rule_name, custom, prefix_code):
+def add_check_and_fix_to_installcheck(item, rule, rule_name, custom, prefix_code, include_echo):
 	# prefix
 	s = SHEBANG + "\n"
 	# add prefix code
@@ -363,15 +363,16 @@ def add_check_and_fix_to_installcheck(item, rule, rule_name, custom, prefix_code
 	# compare to expected result
 	s += create_bash_compare_str(rule["result"], rule_name)
 	# fix
-	s += create_bash_fix_str(rule["fix"], rule_name, item, indent=True)
+	s += create_bash_fix_str(rule["fix"], rule_name, item, include_echo, indent=True,)
 	# suffix
-	s += 'else\n\techo "No fix needed"\nfi'
-	s += "\n\nexit 1"
+	if include_echo:
+		s += 'else\n\techo "No fix needed"\n'
+	s += "fi\n\nexit 1"
 	if custom:
 		s = s.replace("$ODV", custom)
 	item["installcheck_script"] = s
 
-def add_check_to_installcheck(item, rule, rule_name, custom, prefix_code):
+def add_check_to_installcheck(item, rule, rule_name, custom, prefix_code, include_echo):
 	# prefix
 	s = SHEBANG + "\n"
 	# add prefix code
@@ -383,19 +384,20 @@ def add_check_to_installcheck(item, rule, rule_name, custom, prefix_code):
 	# should run fix
 	s += "\texit 0\n"
 	# suffix
-	s += 'else\n\techo "No fix needed"\nfi'
-	s += "\n\nexit 1"
+	if include_echo:
+		s += 'else\n\techo "No fix needed"\n'
+	s += "fi\n\nexit 1"
 	if custom:
 		s = s.replace("$ODV", custom)
 	item["installcheck_script"] = s
 
-def add_fix_to_preinstall(item, rule, rule_name, custom, prefix_code):
+def add_fix_to_preinstall(item, rule, rule_name, custom, prefix_code, include_echo):
 	# prefix
 	s = SHEBANG 
 	# add prefix code
 	s += prefix_code + "\n"
 	# fix
-	s += create_bash_fix_str(rule["fix"], rule_name, item)
+	s += create_bash_fix_str(rule["fix"], rule_name, item, include_echo)
 	if custom:
 		s = s.replace("$ODV", custom)
 	item["preinstall_script"] = s
@@ -413,8 +415,12 @@ def create_bash_compare_str(result_dict, rule_name):
 	key = keys[0]
 	return f'if [[ $result_value != "{result_dict[key]}" ]]; then\n'
 
-def create_bash_fix_str(fix, rule_name, item, indent=False):
-	result = ""
+def create_bash_fix_str(fix, rule_name, item, include_echo, indent=False):
+	result = "" 
+	if include_echo:
+		if indent:
+			result += "\t"
+		result += 'echo "Applying fix"\n'
 	fix = fix.rstrip(" \n")
 	chunks = fix.split("----")
 	# check source
@@ -675,15 +681,17 @@ def process_options():
 						help=f'Optional version to be set in every munki item and appended to the name of every generated munki item.')
 	parser.add_option('--separate', '-s', dest='separate_fix', action='store_true',
 						help='Write fix script in preinstall_script, rather than in installcheck_script.')
+	parser.add_option('--no-munki-output', dest='no_echo', action='store_true',
+						help='Write fix script in preinstall_script, rather than in installcheck_script.')
 	parser.add_option('--markdown', dest='markdown_path', default=MD_PATH,
 						help=f'Optional file name to print markdown summary of how the rules were processed by this script. Defaults to {MD_PATH}')
 	options, _ = parser.parse_args()
-	return options.baseline_path, options.baseline_name, options.custom, options.rules, options.folder, options.config_file, options.output_path, options.prefix, options.suffix, options.version, options.separate_fix, options.markdown_path
+	return options.baseline_path, options.baseline_name, options.custom, options.rules, options.folder, options.config_file, options.output_path, options.prefix, options.suffix, options.version, options.separate_fix, not options.no_echo, options.markdown_path
 
 
 def main():
 	setup_logging()
-	baseline_path, baseline_name, custom_path, rules_path, folder_path, config_path, output_path, prefix, suffix, version, separate_fix, md_path = process_options()
+	baseline_path, baseline_name, custom_path, rules_path, folder_path, config_path, output_path, prefix, suffix, version, separate_fix, include_echo, md_path = process_options()
 	baseline_path, custom_path, rules_path = get_all_input_paths(baseline_path, baseline_name, custom_path, rules_path, folder_path)
 
 	script_summary = {"items_made":[], "items_skipped":[], "rules_no_fix":[]}
@@ -703,10 +711,10 @@ def main():
 				sys.exit(1)
 			rules = section["rules"] 
 			for rule_name in rules:
-				process_rule(rule_name, rules_path, output_path, config, odv_level_items, custom_path, separate_fix, script_summary)
+				process_rule(rule_name, rules_path, output_path, config, odv_level_items, custom_path, separate_fix, include_echo, script_summary)
 
 	else:
-		process_all_rules(rules_path, output_path, config, odv_level_items, custom_path, separate_fix, script_summary)
+		process_all_rules(rules_path, output_path, config, odv_level_items, custom_path, separate_fix, include_echo, script_summary)
 
 	write_md_file(md_path, script_summary)
 
