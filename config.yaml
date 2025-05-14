@@ -4,10 +4,7 @@ fields_from_rule:
   description: "discussion"
 static_fields:
   category: "Compliance"
+  installer_type : "nopkg"
 metadata:
   created_by: "munki-mscp-generator"
   creation_date: "today"
-odv_default: "cis_lvl1"
-odv_level:
-  recommended: 
-    - "audit_acls_files_configure"

@@ -22,7 +22,8 @@ DEFAULT_CONFIG = {
 		"description" : "discussion"
 	},
 	"static_fields": {
-		"category" : "Compliance"
+		"category" : "Compliance",
+		"installer_type" : "nopkg"
 	},
 	"metadata": {
 		"created_by": "munki-mscp-generator",
@@ -96,7 +97,7 @@ def get_custom_path(custom_path, folder_path):
 			custom_path = "custom"
 		if not os.path.exists(custom_path):
 			# no custom subdirectory found
-			logging.info(f"No custom directory found. Continuing without.")
+			logging.warning(f"No custom directory found. Continuing without.")
 			return None
 	# if folder has rules subdirectory go there
 	if os.path.exists(os.path.join(custom_path, "rules")):
@@ -139,7 +140,7 @@ def get_baseline_path(baseline_path, baseline_name, folder_path):
 				if not (baseline_name.endswith(".yaml" or baseline_name.endswith(".yml"))):
 					baseline_name_1 = baseline_name + ".yaml"
 					baseline_path_1 = os.path.join(baseline_path, baseline_name_1)
-					baseline_name_2 = baseline_name + ".yaml"
+					baseline_name_2 = baseline_name + ".yml"
 					baseline_path_2 = os.path.join(baseline_path, baseline_name_2)
 					if os.path.exists(baseline_path_1):
 						baseline_path = baseline_path_1
@@ -492,8 +493,13 @@ def get_config(config_path, prefix, suffix, version):
 		result = dict()
 	check_config(result)
 	format_prefix_suffix(result, prefix, suffix, version)
+<<<<<<< Updated upstream
 	if "delimiter" not in result:
 		result["delimiter"] = "-"
+=======
+	add_default_config_values(result)
+
+>>>>>>> Stashed changes
 	return result
 
 def check_config(config):
@@ -546,6 +552,16 @@ def format_prefix_suffix(config, prefix, suffix, version):
 			config["suffix"] = suffix
 	if version:
 		config["version"] = version
+
+def add_default_config_values(config):
+	if "delimeter" not in config:
+		config["delimeter"] = "-"
+	if "static_fields" not in config:
+		config["static_fields"] = {"installer_type" : "nopkg"}
+		logging.warning("No installer_type specified for munki items. Default (nopkg) will be used.")
+	elif "installer_type" not in config["static_fields"]:
+		config["static_fields"]["installer_type"] = "nopkg"
+		logging.warning("No installer_type specified for munki items. Default (nopkg) will be used.")
 
 # ----------------------------------------
 #                Markdown
