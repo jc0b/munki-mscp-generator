@@ -303,11 +303,15 @@ def create_munki_item(rule, name, output_path, config, odv_level_items, custom_p
 		for key in config["static_fields"]:
 			item[key] = config["static_fields"][key]
 	# check / fix
-	if separate_fix:
-		add_check_to_installcheck(item, rule, name, custom)
-		add_fix_to_preinstall(item, rule, name, custom)
+	if "discussion" in rule:
+		prefix_code = get_code_from_discussion(rule["discussion"])
 	else:
-		add_check_and_fix_to_installcheck(item, rule, name, custom)
+		prefix_code = ""
+	if separate_fix:
+		add_check_to_installcheck(item, rule, name, custom, prefix_code)
+		add_fix_to_preinstall(item, rule, name, custom, prefix_code)
+	else:
+		add_check_and_fix_to_installcheck(item, rule, name, custom, prefix_code)
 	# write
 	write_munki_item(munki_item_name_file_name + ".plist", output_path, item)
 
@@ -349,9 +353,11 @@ def add_to_item(item, rule, item_field, rule_field, custom):
 			value = value.replace("$ODV", custom)
 		item[item_field] = value
 
-def add_check_and_fix_to_installcheck(item, rule, rule_name, custom):
+def add_check_and_fix_to_installcheck(item, rule, rule_name, custom, prefix_code):
 	# prefix
 	s = SHEBANG + "\n"
+	# add prefix code
+	s += prefix_code + "\n"
 	# store check variable
 	s += create_bash_var_str(rule['check']) + "\n"
 	# compare to expected result
@@ -365,9 +371,11 @@ def add_check_and_fix_to_installcheck(item, rule, rule_name, custom):
 		s = s.replace("$ODV", custom)
 	item["installcheck_script"] = s
 
-def add_check_to_installcheck(item, rule, rule_name, custom):
+def add_check_to_installcheck(item, rule, rule_name, custom, prefix_code):
 	# prefix
 	s = SHEBANG + "\n"
+	# add prefix code
+	s += prefix_code + "\n"
 	# store check variable
 	s += create_bash_var_str(rule['check']) + "\n"
 	# compare to expected result
@@ -381,9 +389,11 @@ def add_check_to_installcheck(item, rule, rule_name, custom):
 		s = s.replace("$ODV", custom)
 	item["installcheck_script"] = s
 
-def add_fix_to_preinstall(item, rule, rule_name, custom):
+def add_fix_to_preinstall(item, rule, rule_name, custom, prefix_code):
 	# prefix
 	s = SHEBANG 
+	# add prefix code
+	s += prefix_code + "\n"
 	# fix
 	s += create_bash_fix_str(rule["fix"], rule_name, item)
 	if custom:
@@ -469,6 +479,16 @@ def prep_munki_item_dir(folder_path):
 		logging.info(f"Output path {folder_path} does not exist, so will be created.")
 		os.makedirs(folder_path)
 
+def get_code_from_discussion(discussion):
+	result = ""
+	chunks = discussion.split("----")
+	if len(chunks) > 1:
+		for i, s in enumerate(chunks):
+			if s.endswith("[source,bash]\n") and i < len(chunks)-1:
+				result += chunks[i+1].lstrip(" \n").rstrip(" \n")
+				result += "\n"
+	return result
+
 
 # ----------------------------------------
 #                Config 
@@ -493,13 +513,7 @@ def get_config(config_path, prefix, suffix, version):
 		result = dict()
 	check_config(result)
 	format_prefix_suffix(result, prefix, suffix, version)
-<<<<<<< Updated upstream
-	if "delimiter" not in result:
-		result["delimiter"] = "-"
-=======
 	add_default_config_values(result)
-
->>>>>>> Stashed changes
 	return result
 
 def check_config(config):
@@ -554,8 +568,8 @@ def format_prefix_suffix(config, prefix, suffix, version):
 		config["version"] = version
 
 def add_default_config_values(config):
-	if "delimeter" not in config:
-		config["delimeter"] = "-"
+	if "delimiter" not in config:
+		config["delimiter"] = "-"
 	if "static_fields" not in config:
 		config["static_fields"] = {"installer_type" : "nopkg"}
 		logging.warning("No installer_type specified for munki items. Default (nopkg) will be used.")
