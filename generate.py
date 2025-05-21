@@ -154,16 +154,20 @@ def get_baseline_path(baseline_path, baseline_name, folder_path):
 				else:
 					baseline_path = os.path.join(baseline_path, baseline_name)
 			else:
-				# have directory, if it countains only one file use that file
-				file_names = [file_name for file_name in os.listdir(baseline_path) if (file_name.endswith(".yaml") or file_name.endswith(".yml"))]
-				if len(file_names) == 1:
-					baseline_path = os.path.join(baseline_path, file_names[0])
-				elif len(file_names) == 0:
+				if not baseline_path:
 					logging.warning(f"No path to a custom baseline file found in {baseline_path} so munki items will be generated for all rules provided.")
 					baseline_path = None
+				# have directory, if it contains only one file use that file
 				else:
-					logging.error(f"Multiple files found in {baseline_path}. Please specify the name of your custom baseline.")
-					sys.exit(1)
+					file_names = [file_name for file_name in os.listdir(baseline_path) if (file_name.endswith(".yaml") or file_name.endswith(".yml"))]
+					if len(file_names) == 1:
+						baseline_path = os.path.join(baseline_path, file_names[0])
+					elif len(file_names) == 0:
+						logging.warning(f"No path to a custom baseline file found in {baseline_path} so munki items will be generated for all rules provided.")
+						baseline_path = None
+					else:
+						logging.error(f"Multiple files found in {baseline_path}. Please specify the name of your custom baseline.")
+						sys.exit(1)
 	elif not os.path.exists(baseline_path):
 		logging.error(f"Custom baseline file {baseline_path} is not present.")
 		sys.exit(1)
@@ -240,7 +244,7 @@ def process_all_rules(rules_folder, output_path, config, odv_level_items, custom
 		rule = read_yaml(rule_path)
 		rule_name = get_rule_name(rule_path, rule)
 		if rule_has_fix(rule, rule_name, script_summary):	
-			create_munki_item(rule, rule_name, output_path, rule_path, config, odv_level_items, custom_path, separate_fix, include_echo)
+			create_munki_item(rule, rule_name, output_path, config, odv_level_items, custom_path, separate_fix, include_echo)
 
 def rule_has_fix(rule, name, script_summary):
 	if "check" in rule and "result" in rule and "fix" in rule:
