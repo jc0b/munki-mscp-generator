@@ -14,16 +14,18 @@ CONFIG_PATH = "config.yaml"
 MD_PATH = "munki-mscp-generation-summary.md"
 OUTPUT_PATH = "munki"
 
-SHEBANG = "#!/bin/bash\n"
+SHEBANG_BASH = "#!/bin/bash\n"
+SHEBANG_ZSH = "#!/bin/zsh\n"
 
 DEFAULT_CONFIG = {
-	"fields_from_rule" : {
-		"display_name" : "title",
-		"description" : "discussion"
+	"fields_from_rule": {
+		"display_name": "title",
+		"description": "discussion"
 	},
 	"static_fields": {
-		"category" : "Compliance",
-		"installer_type" : "nopkg"
+		"category": "Compliance",
+		"installer_type": "nopkg",
+		"unattended_install": True
 	},
 	"metadata": {
 		"created_by": "munki-mscp-generator",
@@ -226,11 +228,12 @@ def find_rule(rule_name, rules_folder, looking_for_custom=False):
 	# read rule
 	return read_yaml(rules_path)
 
-def process_rule(rule_name, rules_folder, output_path, config, odv_level_items, custom_path, separate_fix, include_echo, script_summary):
+def process_rule(rule_name, rules_folder, output_path, config, odv_level_items, custom_path, separate_fix, include_echo, config_profile_list_file, script_summary):
 	rule = find_rule(rule_name, rules_folder)
 	rule_name = get_rule_name(rule_name, rule)
-	if rule_has_fix(rule, rule_name, script_summary):
-		create_munki_item(rule, rule_name, output_path, config, odv_level_items, custom_path, separate_fix, include_echo)
+	custom = get_custom(rule, rule_name, custom_path, odv_level_items, config)
+	if rule_has_fix(rule, rule_name, config_profile_list_file, custom, script_summary):
+		create_munki_item(rule, rule_name, output_path, config, odv_level_items, custom_path, separate_fix, include_echo, config_profile_list_file, custom)
 
 def get_all_rules(rules_folder):
 	rules_path = pathlib.Path(rules_folder)
@@ -238,35 +241,52 @@ def get_all_rules(rules_folder):
 	result += list(rules_path.rglob("*.yml"))
 	return result
 
-def process_all_rules(rules_folder, output_path, config, odv_level_items, custom_path, separate_fix, include_echo, script_summary):
+def process_all_rules(rules_folder, output_path, config, odv_level_items, custom_path, separate_fix, include_echo, config_profile_list_file, script_summary):
 	rule_paths = get_all_rules(rules_folder)
 	for rule_path in rule_paths:
 		rule = read_yaml(rule_path)
 		rule_name = get_rule_name(rule_path, rule)
-		if rule_has_fix(rule, rule_name, script_summary):	
-			create_munki_item(rule, rule_name, output_path, config, odv_level_items, custom_path, separate_fix, include_echo)
+		custom = get_custom(rule, rule_name, custom_path, odv_level_items, config)
+		if rule_has_fix(rule, rule_name, config_profile_list_file, custom, script_summary):	
+			create_munki_item(rule, rule_name, output_path, config, odv_level_items, custom_path, separate_fix, include_echo, config_profile_list_file, custom)
 
-def rule_has_fix(rule, name, script_summary):
+def rule_has_fix(rule, name, config_profile_list_file, custom, script_summary):
 	if "check" in rule and "result" in rule and "fix" in rule:
 		# there is fix -> check if fix can be in munki item
+		# check if fix in configuration profile
+		if config_profile_list_file:
+			if is_fix_by_config_profile(rule["fix"]):
+				if "mobileconfig_info" in rule:
+					# if mobileconfig_info given add this as info, otherwise info = mobileconfig
+					if rule["mobileconfig_info"]:
+						script_summary["config_items_made"].append((name, rule["mobileconfig_info"], custom))
+					else:
+						script_summary["config_items_made"].append((name, rule["mobileconfig"], custom))
+				else:
+					logging.error(f"Rule {name} has a fix implemented by a Configuration Profile, but is missing the mobileconfig_info key.")
+					sys.exit(1)
+				return True
+		# check if fix is bash script
 		fix = rule["fix"].rstrip("\n")
 		lines = fix.splitlines()
 		if "source" in lines[0]:
 			chunks = rule["fix"].split("----")
 			if len(chunks) > 2:
 				note = "----".join(chunks[2:]).lstrip(" \n").rstrip(" \n")
-				script_summary["items_made"].append((name, note))
+				script_summary["items_made"].append((name, note, custom))
 			else:
-				script_summary["items_made"].append((name, None))
+				script_summary["items_made"].append((name, None, None))
 			return True
 		else:
 			# Fix must be impolemented outside of a munki item. Item is skipped.
-			# logging.info(f"Note that rule {name} cannot be fixed with a munki item. Fix must be impolemented elsewhere.")
-			script_summary["items_skipped"].append((name, fix))
+			script_summary["items_skipped"].append((name, fix, custom))
 			return False
 	else:
 		script_summary["rules_no_fix"].append(name)
 		False
+
+def is_fix_by_config_profile(fix):
+	return fix.rstrip("\n").lstrip("\n") == "This is implemented by a Configuration Profile."
 
 def get_rule_name(rule_path, rule):
 	if "id" in rule:
@@ -279,10 +299,8 @@ def get_rule_name(rule_path, rule):
 #              Munki Items
 # ----------------------------------------
 
-def create_munki_item(rule, name, output_path, config, odv_level_items, custom_path, separate_fix, include_echo):
+def create_munki_item(rule, name, output_path, config, odv_level_items, custom_path, separate_fix, include_echo, config_profile_list_file, custom):
 	item = dict()
-	# custom
-	custom = get_custom(rule, name, custom_path, odv_level_items, config)
 	# name
 	munki_item_name = get_munki_item_name(name, config)
 	item["name"] = munki_item_name
@@ -301,21 +319,31 @@ def create_munki_item(rule, name, output_path, config, odv_level_items, custom_p
 	# non static keys
 	if "fields_from_rule" in config:
 		for key in config["fields_from_rule"]:
-			add_to_item(item, rule, key, config["fields_from_rule"][key], custom)
+			add_rule_info_to_item(item, rule, key, config["fields_from_rule"][key], custom)
 	# static keys
 	if "static_fields" in config:
 		for key in config["static_fields"]:
 			item[key] = config["static_fields"][key]
 	# check / fix
-	if "discussion" in rule:
-		prefix_code = get_code_from_discussion(rule["discussion"])
+	# fix is with configuration profile
+	if is_fix_by_config_profile(rule["fix"]):
+		if config_profile_list_file:
+			add_config_profile_for_install(item, name, config_profile_list_file, separate_fix, include_echo)
+			add_config_profile_for_uninstall(item, name, config_profile_list_file, include_echo)
+		else:
+			logging.error("Trying to crate munki items for rules where fix must be implemented by a Configuration Profile but no config_profile_list_file is given. Something went wrong!")
+			sys.exit(1)
+	# fix is code
 	else:
-		prefix_code = ""
-	if separate_fix:
-		add_check_to_installcheck(item, rule, name, custom, prefix_code, include_echo)
-		add_fix_to_preinstall(item, rule, name, custom, prefix_code, include_echo)
-	else:
-		add_check_and_fix_to_installcheck(item, rule, name, custom, prefix_code, include_echo)
+		if "discussion" in rule:
+			prefix_code = get_code_from_discussion(rule["discussion"])
+		else:
+			prefix_code = ""
+		if separate_fix:
+			add_check_to_installcheck(item, rule, name, custom, prefix_code, include_echo)
+			add_fix_to_preinstall(item, rule, name, custom, prefix_code, include_echo)
+		else:
+			add_check_and_fix_to_installcheck(item, rule, name, custom, prefix_code, include_echo)
 	# write
 	write_munki_item(munki_item_name_file_name + ".plist", output_path, item)
 
@@ -350,54 +378,64 @@ def get_custom(rule, name, custom_path, odv_level_items, config):
 				sys.exit(1)
 	return custom
 
-def add_to_item(item, rule, item_field, rule_field, custom):
+def add_rule_info_to_item(item, rule, item_field, rule_field, custom):
 	if rule_field in rule:
 		value = rule[rule_field]
 		if custom and type(value) == str:
 			value = value.replace("$ODV", custom)
 		item[item_field] = value
 
+def create_if_else_script(shebang, prefix, comp, if_script, else_script, ends_with_exit1 = True):
+	s = shebang 
+	if prefix and prefix != "":
+		s += prefix.lstrip("\n") + "\n"
+	s += f"if {comp}; then\n"
+	s += "".join([f"\t{line}\n" for line in if_script.splitlines()])
+	if else_script and else_script != "":
+			s += f'else\n'
+			s += "".join([f"\t{line}\n" for line in else_script.splitlines()])
+	s += "fi"
+	if ends_with_exit1:
+		s += "\n\nexit 1"
+	return s
+
 def add_check_and_fix_to_installcheck(item, rule, rule_name, custom, prefix_code, include_echo):
-	# prefix
-	s = SHEBANG + "\n"
-	# add prefix code
-	s += prefix_code + "\n"
 	# store check variable
-	s += create_bash_var_str(rule['check']) + "\n"
+	prefix_code += "\n\n" + create_bash_var_str(rule['check'])
 	# compare to expected result
-	s += create_bash_compare_str(rule["result"], rule_name)
+	comparison = create_bash_compare_str(rule["result"], rule_name)
 	# fix
-	s += create_bash_fix_str(rule["fix"], rule_name, item, include_echo, indent=True,)
+	fix = create_bash_fix_str(rule["fix"], rule_name, item, include_echo)
 	# suffix
+	else_script = None
 	if include_echo:
-		s += 'else\n\techo "No fix needed"\n'
-	s += "fi\n\nexit 1"
+		else_script = 'echo "No fix needed"'
+	# write script
+	s = create_if_else_script(SHEBANG_BASH, prefix_code, comparison, fix, else_script)
 	if custom:
 		s = s.replace("$ODV", custom)
 	item["installcheck_script"] = s
 
 def add_check_to_installcheck(item, rule, rule_name, custom, prefix_code, include_echo):
-	# prefix
-	s = SHEBANG + "\n"
-	# add prefix code
-	s += prefix_code + "\n"
 	# store check variable
-	s += create_bash_var_str(rule['check']) + "\n"
+	prefix_code += "\n\n" + create_bash_var_str(rule['check'])
 	# compare to expected result
-	s += create_bash_compare_str(rule["result"], rule_name)
-	# should run fix
-	s += "\texit 0\n"
+	comparison = create_bash_compare_str(rule["result"], rule_name)
+	# fix
+	if_script = "exit 0"
 	# suffix
+	else_script = None
 	if include_echo:
-		s += 'else\n\techo "No fix needed"\n'
-	s += "fi\n\nexit 1"
+		else_script = 'echo "No fix needed"'
+	# write script
+	s = create_if_else_script(SHEBANG_BASH, prefix_code, comparison, if_script, else_script)
 	if custom:
 		s = s.replace("$ODV", custom)
 	item["installcheck_script"] = s
 
 def add_fix_to_preinstall(item, rule, rule_name, custom, prefix_code, include_echo):
 	# prefix
-	s = SHEBANG 
+	s = SHEBANG_BASH 
 	# add prefix code
 	s += prefix_code + "\n"
 	# fix
@@ -417,13 +455,11 @@ def create_bash_compare_str(result_dict, rule_name):
 		logging.error(f"Result for rule {rule_name} not formatted as expected, so cannot be processed by this script.")
 		sys.exit(1)
 	key = keys[0]
-	return f'if [[ $result_value != "{result_dict[key]}" ]]; then\n'
+	return f'[[ $result_value != "{result_dict[key]}" ]]'
 
-def create_bash_fix_str(fix, rule_name, item, include_echo, indent=False):
+def create_bash_fix_str(fix, rule_name, item, include_echo):
 	result = "" 
 	if include_echo:
-		if indent:
-			result += "\t"
 		result += 'echo "Applying fix"\n'
 	fix = fix.rstrip(" \n")
 	chunks = fix.split("----")
@@ -434,8 +470,6 @@ def create_bash_fix_str(fix, rule_name, item, include_echo, indent=False):
 			fix = fix[1:]
 		# add code to string
 		for line in fix.splitlines():
-			if indent:
-				result +="\t"
 			result += f"{line}\n"
 	else:
 		logging.error(f"Fix for rule {rule_name} not formatted as expected, so cannot be processed by this script.")
@@ -455,9 +489,52 @@ def create_bash_fix_str(fix, rule_name, item, include_echo, indent=False):
 			item["notes"] = note
 		# warn
 		# logging.info(f"Note for item {rule_name}\n\t{note}")
-	lines = fix.splitlines()
-	# check if there are notes
 	return result
+
+def add_config_profile_for_install(item, name, file, separate_fix, echo):
+	prefix = f'PLIST_PATH="{file}"\n\n'
+	prefix2 = f"/usr/libexec/PlistBuddy -c 'Print :RequestedRules' $PLIST_PATH | /usr/bin/grep -qE '^\\s+{name}$'\n"
+	comp = "[[ ! $? ]]"
+	fix = ""
+	else_script = None
+	if echo:
+			fix += 'echo "Adding to plist file"\n'
+			else_script = 'echo "Already in plist file"\n'
+	fix += "/usr/libexec/PlistBuddy -c 'Add :RequestedRules array' $PLIST_PATH\n"
+	fix += f"/usr/libexec/PlistBuddy -c 'Add :RequestedRules: string {name}' $PLIST_PATH\n"
+	if separate_fix:
+		item["installcheck_script"] = create_if_else_script(SHEBANG_ZSH, prefix + prefix2, comp, "exit 0", else_script)
+		item["preinstall_script"] = SHEBANG_ZSH + prefix + fix
+	else:
+		item["installcheck_script"] = create_if_else_script(SHEBANG_ZSH, prefix + prefix2, comp, fix, else_script)
+
+def add_config_profile_for_uninstall(item, name, file, echo):
+	if "autoremove" not in item:
+		item["autoremove"] = True
+	if "unattended_uninstall" not in item:
+		item["unattended_uninstall"] = True
+	if "uninstall_method" not in item:
+		item["uninstall_method"] = "uninstall_script"
+
+	# uninstall
+	prefix = f'PLIST_PATH="{file}"\n\n'
+	# get number of times item in rules
+	prefix2 = f'requested_rule=$(/usr/libexec/PlistBuddy -c "Print :RequestedRules" $PLIST_PATH | /usr/bin/grep -n -E "^\\s+{name}$" | /usr/bin/awk -F ":" \'{"{print $1}"}\')\n'
+	# if 1 then remove it
+	comp = '[ ! -z "$requested_rule" ]'
+	# remove it
+	remove = '# Item to delete is the number minus two\nitemToDelete=$(($requested_rule-2))\n/usr/libexec/PlistBuddy -c "Delete :RequestedRules:$itemToDelete" $PLIST_PATH\n'
+	if echo:
+		remove += 'echo "Removed from plist file"\n'
+	# else do nothing
+	else_script = None
+	if echo:
+		else_script = 'echo "Item already removed from plist file - nothing to do"\n'
+	item["uninstall_script"] = create_if_else_script(SHEBANG_ZSH, prefix + prefix2, comp, remove, else_script, False)
+
+	# uninstall check
+	prefix3 = f'/usr/libexec/PlistBuddy -c \'Print :RequestedRules\' $PLIST_PATH | grep -qE "^\\s+{name}$"\n'
+	item["uninstall_check"] = create_if_else_script(SHEBANG_ZSH, prefix + prefix3,  "[[ $? ]]", "exit 0", None)
 
 def write_munki_item(name, output_path, item):
 	item_path = os.path.join(output_path, name)
@@ -499,7 +576,6 @@ def get_code_from_discussion(discussion):
 				result += "\n"
 	return result
 
-
 # ----------------------------------------
 #                Config 
 # ----------------------------------------
@@ -529,9 +605,9 @@ def get_config(config_path, prefix, suffix, version):
 def check_config(config):
 	if type(config) == dict:
 		keys = config.keys()
-		if set(keys).issubset({"fields_from_rule", "static_fields", "metadata", "odv_default", "odv_level", "prefix", "suffix", "version", "delimiter"}):
+		if set(keys).issubset({"fields_from_rule", "static_fields", "metadata", "odv_default", "odv_level", "prefix", "suffix", "version", "delimiter", "config_profile_list_file"}):
 			for key in keys:
-				if key in ["odv_default", "prefix", "suffix", "delimiter"]:
+				if key in ["odv_default", "prefix", "suffix", "delimiter", "config_profile_list_file"]:
 					if type(config[key]) != str:
 						logging.error(f"Unexpected format of config file. {key} is expected to be type string but is type {type(config[key])}. Please update config file.")
 						sys.exit(1)
@@ -581,11 +657,22 @@ def add_default_config_values(config):
 	if "delimiter" not in config:
 		config["delimiter"] = "-"
 	if "static_fields" not in config:
-		config["static_fields"] = {"installer_type" : "nopkg"}
-		logging.warning("No installer_type specified for munki items. Default (nopkg) will be used.")
+		config["static_fields"] = {"installer_type" : "nopkg", "unattended_install": True}
+		logging.warning("installer_type not specified for munki items. Default (nopkg) will be used.")
+		logging.warning("unattended_install not specified for munki items. Default (True) will be used.")
 	elif "installer_type" not in config["static_fields"]:
 		config["static_fields"]["installer_type"] = "nopkg"
 		logging.warning("No installer_type specified for munki items. Default (nopkg) will be used.")
+	elif "unattended_install" not in config["static_fields"]:
+		config["static_fields"]["unattended_install"] = True
+		logging.warning("unattended_install not specified for munki items. Default (True) will be used.")
+
+def update_config_profile_list_file_from_config(config_profile_list_file, config):
+	if config_profile_list_file:
+		return config_profile_list_file
+	if "config_profile_list_file" not in config:
+		return config_profile_list_file
+	return config["config_profile_list_file" ]
 
 # ----------------------------------------
 #                Markdown
@@ -602,33 +689,64 @@ def write_md_file(md_file, system_settings):
 		logging.error(e, exc_info=True)
 		sys.exit(1)
 
-
 def md_description(system_settings):
-	s = ""
+	s = "# Summary of munki items generated by munki-mscp-generator\n\n"
+
+	s += '## Generated Items\n\n'
+
 	if len(system_settings["items_made"]) > 0:
-		s += "Generated munki items for the following rules:\n"
-		for name, note in system_settings["items_made"]:
-			s += f"- {name}\n"
+		s += "### Generated munki items for the following rules where fixes are implemented with a script:\n"
+		for name, note, custom in system_settings["items_made"]:
+			s += f"* {name}\n"
 			if note:
-				s += "\n".join([f"\t{line}" for line in note.splitlines()])
+				if custom:
+					note = note.replace("$ODV", custom)
+				note = note.replace("*", "\\*")
+				s += "\n".join([f"    * {line}" for line in note.splitlines()])
 				s += "\n"
 		s += "\n\n"
-	else:
-		s += "No munki items generates.\n\n"
 
+	if len(system_settings["config_items_made"]) > 0:
+		s += "### Generated munki items for the following rules where fixes must be implemented by a Configuration Profile:\n"
+		for name, info, custom in system_settings["config_items_made"]:
+			s += f"* {name}\n"
+			if type(info) == dict:
+				for key in info:
+					keys = key
+					if not custom:
+						custom = "$ODV"
+					s += f"    * In preference domain {keys}:\n".replace("$ODV", custom)
+					d = info[key]
+					if d:
+						for key in d:
+							s += f"        * `{key}` must be set to `{d[key]}`\n".replace("$ODV", custom)
+			else:
+				s += f"    * `mobileconfig` = {info}, no `mobileconfig_info` given\n"
+
+	if len(system_settings["items_made"]) + len(system_settings["items_skipped"]) < 1:
+		s += "No munki items generated.\n\n"
+
+	s += '## Skipped Items\n\n'
 	if len(system_settings["items_skipped"]) > 0:
-		s += "The following rules have fixes that must be addressed outside of a munki item:\n"
-		for name, fix in system_settings["items_skipped"]:
-			s += f"- {name} with the fix:\n"
-			s += "\n".join([f"\t{line}" for line in fix.splitlines()])
-			s += "\n"
+		s += "### The following rules have fixes that must be addressed outside of a munki item:\n"
+		for name, fix, custom in system_settings["items_skipped"]:
+			s += f"* {name} with the fix:\n"
+			if custom:
+				fix = fix.replace("$ODV", custom)
+			fix = fix.replace("*", "\*")
+			s += "".join([f"    * {line}\n" if line not in ["", " "] else "" for line in fix.splitlines()])
 		s += "\n\n"
 
 	if len(system_settings["rules_no_fix"]) > 0:
-		s += "The following rules had no defined fix, so were skipped:\n- "
-		s += "\n- ".join(system_settings["rules_no_fix"])
+		s += "### The following rules had no defined fix, so were skipped:\n* "
+		s += "\n* ".join(system_settings["rules_no_fix"])
 		s += "\n\n"
 
+	s = s.replace("&", "\&")
+	s = s.replace("[", "\[")
+	s = s.replace("<", "\<")
+	s = s.replace("]\n    * `\n    *", "\\<")
+	s = s.replace("----", "\----")
 	return s
 
 
@@ -682,26 +800,29 @@ def process_options():
 	parser.add_option('--suffix', dest='suffix',
 						help=f'Optional suffix to add to the name of every generated munki item and it\'s file name..')
 	parser.add_option('--version', '-v', dest='version',
-						help=f'Optional version to be set in every munki item and appended to the name of every generated munki item.')
+						help=f'Optional version to be set in every munki item and appended to the name of every generated munki item. Specifying a version here will override a version given in the configuration yaml file.')
 	parser.add_option('--separate', '-s', dest='separate_fix', action='store_true',
 						help='Write fix script in preinstall_script, rather than in installcheck_script.')
 	parser.add_option('--no-munki-output', dest='no_echo', action='store_true',
 						help='Write fix script in preinstall_script, rather than in installcheck_script.')
+	parser.add_option('--config-profile-list-file', dest='config_profile_list_file',
+						help='Optional path to the file where munki items will write to if their fix can only be implemented by a configuration profile. Specifying a file path here will override a file given in the configuration yaml file.')
 	parser.add_option('--markdown', dest='markdown_path', default=MD_PATH,
 						help=f'Optional file name to print markdown summary of how the rules were processed by this script. Defaults to {MD_PATH}')
 	options, _ = parser.parse_args()
-	return options.baseline_path, options.baseline_name, options.custom, options.rules, options.folder, options.config_file, options.output_path, options.prefix, options.suffix, options.version, options.separate_fix, not options.no_echo, options.markdown_path
+	return options.baseline_path, options.baseline_name, options.custom, options.rules, options.folder, options.config_file, options.output_path, options.prefix, options.suffix, options.version, options.separate_fix, not options.no_echo, options.config_profile_list_file, options.markdown_path
 
 
 def main():
 	setup_logging()
-	baseline_path, baseline_name, custom_path, rules_path, folder_path, config_path, output_path, prefix, suffix, version, separate_fix, include_echo, md_path = process_options()
+	baseline_path, baseline_name, custom_path, rules_path, folder_path, config_path, output_path, prefix, suffix, version, separate_fix, include_echo, config_profile_list_file, md_path = process_options()
 	baseline_path, custom_path, rules_path = get_all_input_paths(baseline_path, baseline_name, custom_path, rules_path, folder_path)
 
-	script_summary = {"items_made":[], "items_skipped":[], "rules_no_fix":[]}
+	script_summary = {"items_made":[], "config_items_made":[], "items_skipped":[], "rules_no_fix":[]}
 
 	config = get_config(config_path, prefix, suffix, version)
 	odv_level_items = get_all_items_odv_level(config)
+	config_profile_list_file = update_config_profile_list_file_from_config(config_profile_list_file, config)
 
 	prep_munki_item_dir(output_path)
 
@@ -715,10 +836,10 @@ def main():
 				sys.exit(1)
 			rules = section["rules"] 
 			for rule_name in rules:
-				process_rule(rule_name, rules_path, output_path, config, odv_level_items, custom_path, separate_fix, include_echo, script_summary)
+				process_rule(rule_name, rules_path, output_path, config, odv_level_items, custom_path, separate_fix, include_echo, config_profile_list_file, script_summary)
 
 	else:
-		process_all_rules(rules_path, output_path, config, odv_level_items, custom_path, separate_fix, include_echo, script_summary)
+		process_all_rules(rules_path, output_path, config, odv_level_items, custom_path, separate_fix, include_echo, config_profile_list_file, script_summary)
 
 	write_md_file(md_path, script_summary)
 

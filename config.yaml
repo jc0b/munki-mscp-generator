@@ -4,7 +4,8 @@ fields_from_rule:
   description: "discussion"
 static_fields:
   category: "Compliance"
-  installer_type : "nopkg"
+  installer_type: "nopkg"
+  unattended_install: True
 metadata:
   created_by: "munki-mscp-generator"
   creation_date: "today"
