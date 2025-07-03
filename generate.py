@@ -534,7 +534,7 @@ def add_config_profile_for_uninstall(item, name, file, echo):
 
 	# uninstall check
 	prefix3 = f'/usr/libexec/PlistBuddy -c \'Print :RequestedRules\' $PLIST_PATH | grep -qE "^\\s+{name}$"\n'
-	item["uninstall_check"] = create_if_else_script(SHEBANG_ZSH, prefix + prefix3,  "[[ $? ]]", "exit 0", None)
+	item["uninstallcheck_script"] = create_if_else_script(SHEBANG_ZSH, prefix + prefix3,  "[[ $? ]]", "exit 0", None)
 
 def write_munki_item(name, output_path, item):
 	item_path = os.path.join(output_path, name)
