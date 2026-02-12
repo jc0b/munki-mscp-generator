@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 
 import datetime
-import datetime
 import logging
 import optparse
 import os
@@ -36,9 +35,9 @@ DEFAULT_CONFIG = {
 # ----------------------------------------
 #            Path Navigation
 # ----------------------------------------
-def get_all_input_paths(baseline_path, baseline_name, custom_path, rules_path, folder_path):
+def get_all_input_paths(platform, target, baseline_path, baseline_name, custom_path, rules_path, folder_path):
 	check_folder_path(baseline_path, custom_path, rules_path, folder_path)
-	baseline_path = get_baseline_path(baseline_path, baseline_name, folder_path)
+	baseline_path = get_baseline_path(platform, target, baseline_path, baseline_name, folder_path)
 	custom_path = get_custom_path(custom_path, folder_path)
 	rules_path = get_rules_path(rules_path, folder_path)
 	return baseline_path, custom_path, rules_path
@@ -108,11 +107,11 @@ def get_custom_path(custom_path, folder_path):
 		logging.info(f"Using directory {custom_path} as custom directory.")
 	return custom_path
 
-def get_baseline_path(baseline_path, baseline_name, folder_path):
+def get_baseline_path(platform, target, baseline_path, baseline_name, folder_path):
 	original_path = baseline_path
-	# if no baseline path given check if we can make it
-	# can be in given folder, baseline folder, or current directory
 	if not baseline_path:
+		# if no baseline path given check if we can find it
+		# can be in given folder, baseline folder or current folder
 		if folder_path:
 			baseline_path = os.path.join(folder_path, "baselines")
 		elif os.path.exists("baselines"):
@@ -135,6 +134,15 @@ def get_baseline_path(baseline_path, baseline_name, folder_path):
 				baseline_path = None
 		else:
 			# baselines subdirectory found
+			# look for correct subdirectory
+			upper_baseline_path = baseline_path
+			if not baseline_path:
+				baseline_path = ""
+			baseline_path = os.path.join(baseline_path, platform.lower())
+			baseline_path = os.path.join(baseline_path, target.removesuffix(".0"))
+			if not os.path.exists(baseline_path):
+				# subdirectory does not exist -> see if file name is in current folder
+				baseline_path = upper_baseline_path
 			# if name is given
 			if baseline_name:
 				if not baseline_path:
@@ -170,6 +178,7 @@ def get_baseline_path(baseline_path, baseline_name, folder_path):
 					else:
 						logging.error(f"Multiple files found in {baseline_path}. Please specify the name of your custom baseline.")
 						sys.exit(1)
+	# baseline path given so should exist
 	elif not os.path.exists(baseline_path):
 		logging.error(f"Custom baseline file {baseline_path} is not present.")
 		sys.exit(1)
@@ -228,12 +237,12 @@ def find_rule(rule_name, rules_folder, looking_for_custom=False):
 	# read rule
 	return read_yaml(rules_path)
 
-def process_rule(rule_name, rules_folder, output_path, config, odv_level_items, custom_path, separate_fix, include_echo, config_profile_list_file, script_summary):
+def process_rule(rule_name, rules_folder, platform, target, output_path, config, odv_level_items, custom_path, separate_fix, include_echo, config_profile_list_file, script_summary):
 	rule = find_rule(rule_name, rules_folder)
 	rule_name = get_rule_name(rule_name, rule)
 	custom = get_custom(rule, rule_name, custom_path, odv_level_items, config)
-	if rule_has_fix(rule, rule_name, config_profile_list_file, custom, script_summary):
-		create_munki_item(rule, rule_name, output_path, config, odv_level_items, custom_path, separate_fix, include_echo, config_profile_list_file, custom)
+	if rule_has_fix(rule, platform, target, rule_name, config_profile_list_file, custom, script_summary):
+		create_munki_item(rule, rule_name, platform, taret, output_path, config, odv_level_items, custom_path, separate_fix, include_echo, config_profile_list_file, custom)
 
 def get_all_rules(rules_folder):
 	rules_path = pathlib.Path(rules_folder)
@@ -241,17 +250,19 @@ def get_all_rules(rules_folder):
 	result += list(rules_path.rglob("*.yml"))
 	return result
 
-def process_all_rules(rules_folder, output_path, config, odv_level_items, custom_path, separate_fix, include_echo, config_profile_list_file, script_summary):
+def process_all_rules(rules_folder, platform, target, output_path, config, odv_level_items, custom_path, separate_fix, include_echo, config_profile_list_file, script_summary):
 	rule_paths = get_all_rules(rules_folder)
 	for rule_path in rule_paths:
 		rule = read_yaml(rule_path)
 		rule_name = get_rule_name(rule_path, rule)
 		custom = get_custom(rule, rule_name, custom_path, odv_level_items, config)
 		if rule_has_fix(rule, rule_name, config_profile_list_file, custom, script_summary):	
-			create_munki_item(rule, rule_name, output_path, config, odv_level_items, custom_path, separate_fix, include_echo, config_profile_list_file, custom)
+			create_munki_item(rule, rule_name, platform, taret, output_path, config, odv_level_items, custom_path, separate_fix, include_echo, config_profile_list_file, custom)
 
-def rule_has_fix(rule, name, config_profile_list_file, custom, script_summary):
-	if "check" in rule and "result" in rule and "fix" in rule:
+def rule_has_fix(rule, platform, target, name, config_profile_list_file, custom, script_summary):
+	check = get_rule_check(rule, platform, target)
+	fix = get_rule_fix(rule, platform, target)
+	if check and "result" in check and fix:
 		# there is fix -> check if fix can be in munki item
 		# check if fix in configuration profile
 		if config_profile_list_file:
@@ -281,15 +292,50 @@ def rule_has_fix(rule, name, config_profile_list_file, custom, script_summary):
 			# Fix must be impolemented outside of a munki item. Item is skipped.
 			script_summary["items_skipped"].append((name, fix, custom))
 			return False
-	else:
-		script_summary["rules_no_fix"].append(name)
-		False
+	script_summary["rules_no_fix"].append(name)
+	return False
+
+def get_target_enforcement_info(rule, platform, target):
+	if "platforms" in rule and platform in rule["platforms"]:
+		if target in rule["platforms"][platform]:
+			rule_target = rule["platforms"][platform][taget]
+		elif target + ".0" in rule["platforms"][platform]:
+			rule_target = rule["platforms"][platform][taget]
+		if rule_target:
+			if "enforcement_info" in rule_target:
+				return rule_target["enforcement_info"]
+	return None
+
+def get_platform_enforcement_info(rule, platform):
+	if "platforms" in rule and platform in rule["platforms"]:
+		if "enforcement_info" in rule["platforms"][platform]:
+			return rule["platforms"][platform]["enforcement_info"]
+	return None
+
+def get_rule_check(rule, platform, target):
+	enforcement_info = get_target_enforcement_info(rule, platform, target)
+	if enforcement_info and "check" in enforcement_info:
+		return enforcement_info["check"]
+	enforcement_info = get_platform_enforcement_info(rule, platform):
+	if enforcement_info and "check" in enforcement_info:
+		return enforcement_info["check"]
+	return None
+
+def get_rule_fix(rule, platform, target):
+	enforcement_info = get_target_enforcement_info(rule, platform, target)
+	if enforcement_info and "fix" in enforcement_info:
+		return enforcement_info["fix"]
+	enforcement_info = get_platform_enforcement_info(rule, platform):
+	if enforcement_info and "fix" in enforcement_info:
+		return enforcement_info["fix"]
+	return None
 
 def is_fix_by_config_profile(fix):
 	return fix.rstrip("\n").lstrip("\n") == "This is implemented by a Configuration Profile."
 
 def get_rule_name(rule_path, rule):
 	if "id" in rule:
+		print('got name')
 		return rule["id"]
 	else:
 		#get name from file name
@@ -299,7 +345,7 @@ def get_rule_name(rule_path, rule):
 #              Munki Items
 # ----------------------------------------
 
-def create_munki_item(rule, name, output_path, config, odv_level_items, custom_path, separate_fix, include_echo, config_profile_list_file, custom):
+def create_munki_item(rule, name, platform, taret, output_path, config, odv_level_items, custom_path, separate_fix, include_echo, config_profile_list_file, custom):
 	item = dict()
 	# name
 	munki_item_name = get_munki_item_name(name, config)
@@ -780,43 +826,47 @@ def setup_logging():
 
 def process_options():
 	parser = optparse.OptionParser()
-	parser.set_usage('Usage: %prog [options]')
-	parser.add_option('--baseline-path', '-b', dest='baseline_path',
-						help='Optional path to custom baseline yaml file.')
-	parser.add_option('--baseline-name', '-n', dest='baseline_name',
-						help='Optional name of baseline yaml file.')
-	parser.add_option('--custom', '-c', dest='custom',
-						help='Optional path to custom folder.')
-	parser.add_option('--rules', '-r', dest='rules',
-						help='Optional path to rules folder.')
-	parser.add_option('--folder', '-f', dest='folder',
-						help='Optional path to a folder optionally containing a baselines, custom and rules folder. These folders will be used if paths are not directly specified.')
-	parser.add_option('--config', '-y', dest='config_file',
-						help=f'Optional path to the configuration yaml file, which specifies values for the munki item. Defaults to {CONFIG_PATH}')
-	parser.add_option('--munki', '-m', dest='output_path', default=OUTPUT_PATH,
-						help=f'Optional path to the directory generated munki files should be written to. Defaults to {OUTPUT_PATH}')
-	parser.add_option('--prefix', dest='prefix',
-						help=f'Optional prefix to add to the name of every generated munki item and it\'s file name.')
-	parser.add_option('--suffix', dest='suffix',
-						help=f'Optional suffix to add to the name of every generated munki item and it\'s file name..')
-	parser.add_option('--version', '-v', dest='version',
-						help=f'Optional version to be set in every munki item and appended to the name of every generated munki item. Specifying a version here will override a version given in the configuration yaml file.')
-	parser.add_option('--separate', '-s', dest='separate_fix', action='store_true',
-						help='Write fix script in preinstall_script, rather than in installcheck_script.')
-	parser.add_option('--no-munki-output', dest='no_echo', action='store_true',
-						help='Write fix script in preinstall_script, rather than in installcheck_script.')
-	parser.add_option('--config-profile-list-file', dest='config_profile_list_file',
-						help='Optional path to the file where munki items will write to if their fix can only be implemented by a configuration profile. Specifying a file path here will override a file given in the configuration yaml file.')
-	parser.add_option('--markdown', dest='markdown_path', default=MD_PATH,
-						help=f'Optional file name to print markdown summary of how the rules were processed by this script. Defaults to {MD_PATH}')
+	parser.set_usage("Usage: %prog [options]")
+	parser.add_option("--platform", "-p", dest="platform", default="macOS",
+						help="Optional platform for the script to look at. Defaults to 'macOS', but can also be 'iOS', or 'visionOS', although these options do not currently generate monkey items as they do not have shell fixes.")
+	parser.add_option("--target", "-t", dest="target",
+						help="Mandatory target version of OS.")
+	parser.add_option("--baseline-path", "-b", dest="baseline_path",
+						help="Optional path to custom baseline yaml file.")
+	parser.add_option("--baseline-name", "-n", dest="baseline_name",
+						help="Optional name of baseline yaml file.")
+	parser.add_option("--custom", "-c", dest="custom",
+						help="Optional path to custom folder.")
+	parser.add_option("--rules", "-r", dest="rules",
+						help="Optional path to rules folder.")
+	parser.add_option("--folder", "-f", dest="folder",
+						help="Optional path to a folder optionally containing a baselines, custom and rules folder. These folders will be used if paths are not directly specified.")
+	parser.add_option("--config", "-y", dest="config_file",
+						help=f"Optional path to the configuration yaml file, which specifies values for the munki item. Defaults to {CONFIG_PATH}")
+	parser.add_option("--munki", "-m", dest="output_path", default=OUTPUT_PATH,
+						help=f"Optional path to the directory generated munki files should be written to. Defaults to {OUTPUT_PATH}")
+	parser.add_option("--prefix", dest="prefix",
+						help=f"Optional prefix to add to the name of every generated munki item and it's file name.")
+	parser.add_option("--suffix", dest="suffix",
+						help=f"Optional suffix to add to the name of every generated munki item and it's file name.")
+	parser.add_option("--version", "-v", dest="version",
+						help=f"Optional version to be set in every munki item and appended to the name of every generated munki item. Specifying a version here will override a version given in the configuration yaml file.")
+	parser.add_option("--separate", "-s", dest="separate_fix", action="store_true",
+						help="Write fix script in preinstall_script, rather than in installcheck_script.")
+	parser.add_option("--no-munki-output", dest="no_echo", action="store_true",
+						help="Write fix script in preinstall_script, rather than in installcheck_script.")
+	parser.add_option("--config-profile-list-file", dest="config_profile_list_file",
+						help="Optional path to the file where munki items will write to if their fix can only be implemented by a configuration profile. Specifying a file path here will override a file given in the configuration yaml file.")
+	parser.add_option("--markdown", dest="markdown_path", default=MD_PATH,
+						help=f"Optional file name to print markdown summary of how the rules were processed by this script. Defaults to {MD_PATH}")
 	options, _ = parser.parse_args()
-	return options.baseline_path, options.baseline_name, options.custom, options.rules, options.folder, options.config_file, options.output_path, options.prefix, options.suffix, options.version, options.separate_fix, not options.no_echo, options.config_profile_list_file, options.markdown_path
+	return options.platform, options.target, options.baseline_path, options.baseline_name, options.custom, options.rules, options.folder, options.config_file, options.output_path, options.prefix, options.suffix, options.version, options.separate_fix, not options.no_echo, options.config_profile_list_file, options.markdown_path
 
 
 def main():
 	setup_logging()
-	baseline_path, baseline_name, custom_path, rules_path, folder_path, config_path, output_path, prefix, suffix, version, separate_fix, include_echo, config_profile_list_file, md_path = process_options()
-	baseline_path, custom_path, rules_path = get_all_input_paths(baseline_path, baseline_name, custom_path, rules_path, folder_path)
+	platform, target, baseline_path, baseline_name, custom_path, rules_path, folder_path, config_path, output_path, prefix, suffix, version, separate_fix, include_echo, config_profile_list_file, md_path = process_options()
+	baseline_path, custom_path, rules_path = get_all_input_paths(platform, target, baseline_path, baseline_name, custom_path, rules_path, folder_path)
 
 	script_summary = {"items_made":[], "config_items_made":[], "items_skipped":[], "rules_no_fix":[]}
 
@@ -831,17 +881,18 @@ def main():
 		check_baseline_defaults(baseline, config)
 		profile = get_baseline_profile(baseline, baseline_path)
 		for section in profile:
-			if "rules" not in section or type(section["rules"]) != list:
-				logging.error(f"Unexpected configuration of baseline file {baseline_path} rules not found where expected")
-				sys.exit(1)
-			rules = section["rules"] 
-			for rule_name in rules:
-				process_rule(rule_name, rules_path, output_path, config, odv_level_items, custom_path, separate_fix, include_echo, config_profile_list_file, script_summary)
+			if section["section"] != "Supplemental": # skip supplemental section as these dont have rules
+				if "rules" not in section or type(section["rules"]) != list:
+					logging.error(f"Unexpected configuration of baseline file {baseline_path} rules not found where expected")
+					sys.exit(1)
+				rules = section["rules"] 
+				for rule_name in rules:
+					process_rule(rule_name, rules_path, platform, target, output_path, config, odv_level_items, custom_path, separate_fix, include_echo, config_profile_list_file, script_summary)
 
 	else:
-		process_all_rules(rules_path, output_path, config, odv_level_items, custom_path, separate_fix, include_echo, config_profile_list_file, script_summary)
+		process_all_rules(rules_path, platform, target, output_path, config, odv_level_items, custom_path, separate_fix, include_echo, config_profile_list_file, script_summary)
 
 	write_md_file(md_path, script_summary)
 
-if __name__ == '__main__':
+if __name__ == "__main__":
 	main()
