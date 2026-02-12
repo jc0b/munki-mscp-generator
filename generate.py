@@ -1,4 +1,3 @@
-temp.py
 #!/usr/bin/env python3
 
 import datetime
@@ -48,6 +47,7 @@ def process_rule(rule, config, separate_fix, include_echo, mobile_config_path, o
 	if "warning:" in rule.discussion.lower():
 		n = rule.discussion.lower().find("warning:") 
 		note2 = rule.discussion[n:].strip()
+		logging.warning(f"Rule {rule.rule_id} comes with the following warning:\n\t{note2}\n\tNote that despite the warning a munki item has been created for {rule.rule_id}. If you wish to remove this rule, please do so in the baseline.\n\n")
 		if note:
 			if len(note2) > len(note):
 				note = note2
@@ -63,12 +63,12 @@ def process_rule(rule, config, separate_fix, include_echo, mobile_config_path, o
 	if (rule.check and rule.result_value and rule.fix):
 		create_munki_item(rule, config, separate_fix, include_echo, mobile_config_path, output_path)
 		script_summary["items_made"].append((rule.rule_id, note))
-	if rule.mobileconfig_info:
+	elif rule.mobileconfig_info:
 		if mobile_config_path:
 			create_munki_item(rule, config, separate_fix, include_echo, mobile_config_path, output_path)
-			script_summary["items_made"].append((rule.rule_id, rule.mobileconfig_info, note))
-		else:
 			script_summary["config_items_made"].append((rule.rule_id, rule.mobileconfig_info, note))
+		else:
+			script_summary["items_skipped"].append((rule.rule_id, rule.mobileconfig_info, note))
 	else:
 		script_summary["rules_no_fix"].append((rule.rule_id, note))
 
@@ -106,7 +106,7 @@ def create_munki_item(rule, config, separate_fix, include_echo, mobile_config_pa
 	# fix is with configuration profile
 	if rule.mobileconfig_info and mobile_config_path:
 		if mobile_config_path:
-			add_write_to_mobile_config_profile_file(item, rule.rule_id, mobile_config_path, separate_fix, echo)
+			add_write_to_mobile_config_profile_file(item, rule.rule_id, mobile_config_path, separate_fix, include_echo)
 		else:
 			logging.error("Trying to crate munki items for rules where fix must be implemented by a Configuration Profile but no mobile_config_path is given. Something went wrong!")
 			sys.exit(1)
@@ -183,18 +183,18 @@ def create_bash_fix_str(rule, include_echo):
 	result += rule.fix
 	return result
 
-def add_write_to_mobile_config_profile_file(item, name, path, separate_fix, echo):
-	add_config_profile_for_install(item, name, path, separate_fix, echo)
-	add_config_profile_for_uninstall(item, name, path)
+def add_write_to_mobile_config_profile_file(item, name, path, separate_fix, include_echo):
+	add_config_profile_for_install(item, name, path, separate_fix, include_echo)
+	add_config_profile_for_uninstall(item, name, path, include_echo)
 
 
-def add_config_profile_for_install(item, name, path, separate_fix, echo):
+def add_config_profile_for_install(item, name, path, separate_fix, include_echo):
 	prefix = f'PLIST_PATH="{path}"\n\n'
 	prefix2 = f"/usr/libexec/PlistBuddy -c 'Print :RequestedRules' $PLIST_PATH | /usr/bin/grep -qE '^\\s+{name}$'\n"
 	comp = "[[ ! $? ]]"
 	fix = ""
 	else_script = None
-	if echo:
+	if include_echo:
 			fix += "echo \"Adding to plist file\"\n"
 			else_script = "echo \"Already in plist file\"\n"
 	fix += "/usr/libexec/PlistBuddy -c 'Add :RequestedRules array' $PLIST_PATH\n"
@@ -205,7 +205,7 @@ def add_config_profile_for_install(item, name, path, separate_fix, echo):
 	else:
 		item["installcheck_script"] = create_if_else_script(SHEBANG_ZSH, prefix + prefix2, comp, fix, else_script)
 
-def add_config_profile_for_uninstall(item, name, path):
+def add_config_profile_for_uninstall(item, name, path, include_echo):
 	if "autoremove" not in item:
 		item["autoremove"] = True
 	if "unattended_uninstall" not in item:
@@ -221,11 +221,11 @@ def add_config_profile_for_uninstall(item, name, path):
 	comp = '[ ! -z "$requested_rule" ]'
 	# remove it
 	remove = '# Item to delete is the number minus two\nitemToDelete=$(($requested_rule-2))\n/usr/libexec/PlistBuddy -c "Delete :RequestedRules:$itemToDelete" $PLIST_PATH\n'
-	if echo:
+	if include_echo:
 		remove += 'echo "Removed from plist file"\n'
 	# else do nothing
 	else_script = None
-	if echo:
+	if include_echo:
 		else_script = 'echo "Item already removed from plist file - nothing to do"\n'
 	item["uninstall_script"] = create_if_else_script(SHEBANG_ZSH, prefix + prefix2, comp, remove, else_script, False)
 
@@ -355,7 +355,7 @@ def update_mobile_config_path(path, config):
 	if path:
 		return path
 	if "mobile_config_file" not in config:
-		return path
+		return None
 	return config["mobile_config_file"]
 
 # # ----------------------------------------
@@ -536,17 +536,18 @@ def main():
 	setup_logging()
 
 	mscp_path, baseline_path, config_path, output_path, prefix, suffix, version, separate_fix, include_echo, mobile_config_path, md_path = process_options()
-
+	# get config
+	config = get_config(config_path, prefix, suffix, version)
 	# store paths
 	wd = os.getcwd()
 	baseline_path = os.path.abspath(baseline_path)
 	output_path = os.path.abspath(output_path)
 	md_path = os.path.abspath(md_path)
-	mobile_config_path = os.path.abspath(update_config_profile_list_file_from_config(config, mobile_config_path))
+	mobile_config_path = update_mobile_config_path(mobile_config_path, config)
+	if mobile_config_path:
+		mobile_config_path = os.path.abspath(mobile_config_path)
 	# output dir
 	prep_munki_item_dir(output_path)
-	# get config
-	config = get_config(config_path, prefix, suffix, version)
 	# prep summary
 	script_summary = {"items_made":[], "config_items_made":[], "items_skipped":[], "rules_no_fix":[]}
 	# import clases (and change working dir)
