@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-
 import datetime
 # import importlib.util
 import logging
@@ -7,7 +6,7 @@ import optparse
 import os
 import pathlib
 import plistlib
-import runpy
+# import runpy
 import sys
 import yaml
 
@@ -60,7 +59,7 @@ def process_rule(rule, config, separate_fix, include_echo, mobile_config_path, o
 	# 	note = rule.discussion[n:].strip()
 	# 	n = note.lower().find("[source")
 	# 	note = note[:n].strip()
-	if (rule.check and rule.result_value and rule.fix):
+	if (rule.check and rule.result_value != None and rule.fix):
 		create_munki_item(rule, config, separate_fix, include_echo, mobile_config_path, output_path)
 		script_summary["items_made"].append((rule.rule_id, note))
 	elif rule.mobileconfig_info:
@@ -70,7 +69,9 @@ def process_rule(rule, config, separate_fix, include_echo, mobile_config_path, o
 		else:
 			script_summary["items_skipped"].append((rule.rule_id, rule.mobileconfig_info, note))
 	else:
-		script_summary["rules_no_fix"].append((rule.rule_id, note))
+		if not note:
+			note = ""
+		script_summary["rules_no_fix"].append((rule.rule_id, f"The fix mechanism is {rule.mechanism}. \n{note}"))
 
 
 # # ----------------------------------------
@@ -449,8 +450,9 @@ def mscp_imports(path):
 		sys.path.append(os.path.abspath(path))
 		os.chdir(path)
 		logging.info("Importing from mSCP directory...")
+		import src.mscp.classes.baseline
 		from src.mscp.classes.baseline import Baseline
-		from src.mscp.classes.macsecurityrule import Macsecurityrule as Rule
+		# from src.mscp.classes.macsecurityrule import Macsecurityrule as Rule
 		logging.info("Successfully finished importing from mSCP directory.")
 	except Exception as e:
 		logging.error(f"Unable to import necessary classes from {path}. This directory should correspond to https://github.com/usnistgov/macos_security.")
@@ -461,7 +463,6 @@ def mscp_imports(path):
 # # ----------------------------------------
 # #           Helper functions
 # # ----------------------------------------
-
 def read_yaml(file_path) -> dict:
 	if not os.access(file_path, os.R_OK):
 		logging.error(f"No access to {file_path}")
