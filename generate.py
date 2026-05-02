@@ -335,15 +335,14 @@ def create_munki_item(rule, name, output_path, config, odv_level_items, custom_p
 			sys.exit(1)
 	# fix is code
 	else:
+		prefix_code = ""
 		if "discussion" in rule:
 			prefix_code = get_code_from_discussion(rule["discussion"])
-		else:
-			prefix_code = ""
 		if separate_fix:
-			add_check_to_installcheck(item, rule, name, custom, prefix_code, include_echo)
+			add_check_to_installcheck(item, rule, name, custom, config["check_prefix"] + "\n" + prefix_code, include_echo)
 			add_fix_to_preinstall(item, rule, name, custom, prefix_code, include_echo)
 		else:
-			add_check_and_fix_to_installcheck(item, rule, name, custom, prefix_code, include_echo)
+			add_check_and_fix_to_installcheck(item, rule, name, custom, config["check_prefix"] + "\n" + prefix_code, include_echo)
 	# write
 	write_munki_item(munki_item_name_file_name + ".plist", output_path, item)
 
@@ -401,6 +400,7 @@ def create_if_else_script(shebang, prefix, comp, if_script, else_script, ends_wi
 
 def add_check_and_fix_to_installcheck(item, rule, rule_name, custom, prefix_code, include_echo):
 	# store check variable
+	prefix_code = prefix_code.rstrip("\n")
 	prefix_code += "\n\n" + create_bash_var_str(rule['check'])
 	# compare to expected result
 	comparison = create_bash_compare_str(rule["result"], rule_name)
@@ -418,6 +418,7 @@ def add_check_and_fix_to_installcheck(item, rule, rule_name, custom, prefix_code
 
 def add_check_to_installcheck(item, rule, rule_name, custom, prefix_code, include_echo):
 	# store check variable
+	prefix_code = prefix_code.rstrip("\n")
 	prefix_code += "\n\n" + create_bash_var_str(rule['check'])
 	# compare to expected result
 	comparison = create_bash_compare_str(rule["result"], rule_name)
@@ -605,9 +606,9 @@ def get_config(config_path, prefix, suffix, version):
 def check_config(config):
 	if type(config) == dict:
 		keys = config.keys()
-		if set(keys).issubset({"fields_from_rule", "static_fields", "metadata", "odv_default", "odv_level", "prefix", "suffix", "version", "delimiter", "config_profile_list_file"}):
+		if set(keys).issubset({"fields_from_rule", "static_fields", "metadata", "odv_default", "odv_level", "prefix", "suffix", "version", "delimiter", "config_profile_list_file", "check_prefix"}):
 			for key in keys:
-				if key in ["odv_default", "prefix", "suffix", "delimiter", "config_profile_list_file"]:
+				if key in ["odv_default", "prefix", "suffix", "delimiter", "config_profile_list_file", "check_prefix"]:
 					if type(config[key]) != str:
 						logging.error(f"Unexpected format of config file. {key} is expected to be type string but is type {type(config[key])}. Please update config file.")
 						sys.exit(1)
@@ -656,6 +657,8 @@ def format_prefix_suffix(config, prefix, suffix, version):
 def add_default_config_values(config):
 	if "delimiter" not in config:
 		config["delimiter"] = "-"
+	if "check_prefix" not in config:
+		config["check_prefix"] = ""
 	if "static_fields" not in config:
 		config["static_fields"] = {"installer_type" : "nopkg", "unattended_install": True}
 		logging.warning("installer_type not specified for munki items. Default (nopkg) will be used.")
