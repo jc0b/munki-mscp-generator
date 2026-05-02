@@ -38,7 +38,7 @@ DEFAULT_CONFIG = {
 # #              Rules
 # # ----------------------------------------
 
-def process_rule(rule, config, separate_fix, include_echo, mobile_config_path, output_path, script_summary):
+def process_rule(rule, config, separate_fix, include_echo, mobileconfig_path, output_path, script_summary):
 	note = None
 	if "note:" in rule.discussion.lower():
 		n = rule.discussion.lower().find("note:") 
@@ -52,19 +52,12 @@ def process_rule(rule, config, separate_fix, include_echo, mobile_config_path, o
 				note = note2
 		else:
 			note = note2
-	# if "[note]" in rule.discussion.lower():
-	# 	if note:
-	# 		print("already have note")
-	# 	n = rule.discussion.lower().find("====") + len("====")
-	# 	note = rule.discussion[n:].strip()
-	# 	n = note.lower().find("[source")
-	# 	note = note[:n].strip()
 	if (rule.check and rule.result_value != None and rule.fix):
-		create_munki_item(rule, config, separate_fix, include_echo, mobile_config_path, output_path)
+		create_munki_item(rule, config, separate_fix, include_echo, mobileconfig_path, output_path)
 		script_summary["items_made"].append((rule.rule_id, note))
 	elif rule.mobileconfig_info:
-		if mobile_config_path:
-			create_munki_item(rule, config, separate_fix, include_echo, mobile_config_path, output_path)
+		if mobileconfig_path:
+			create_munki_item(rule, config, separate_fix, include_echo, mobileconfig_path, output_path)
 			script_summary["config_items_made"].append((rule.rule_id, rule.mobileconfig_info, note))
 		else:
 			script_summary["items_skipped"].append((rule.rule_id, rule.mobileconfig_info, note))
@@ -78,7 +71,7 @@ def process_rule(rule, config, separate_fix, include_echo, mobile_config_path, o
 # #              Munki Items
 # # ----------------------------------------
 
-def create_munki_item(rule, config, separate_fix, include_echo, mobile_config_path, output_path):
+def create_munki_item(rule, config, separate_fix, include_echo, mobileconfig_path, output_path):
 	item = dict()
 	# name
 	munki_item_name = get_munki_item_name(rule.rule_id, config)
@@ -105,11 +98,11 @@ def create_munki_item(rule, config, separate_fix, include_echo, mobile_config_pa
 			item[key] = config["static_fields"][key]
 	# check / fix
 	# fix is with configuration profile
-	if rule.mobileconfig_info and mobile_config_path:
-		if mobile_config_path:
-			add_write_to_mobile_config_profile_file(item, rule.rule_id, mobile_config_path, separate_fix, include_echo)
+	if rule.mobileconfig_info and mobileconfig_path:
+		if mobileconfig_path:
+			add_write_to_mobileconfig_profile_file(item, rule.rule_id, mobileconfig_path, separate_fix, include_echo)
 		else:
-			logging.error("Trying to crate munki items for rules where fix must be implemented by a Configuration Profile but no mobile_config_path is given. Something went wrong!")
+			logging.error("Trying to crate munki items for rules where fix must be implemented by a Configuration Profile but no mobileconfig_path is given. Something went wrong!")
 			sys.exit(1)
 	# fix is code
 	else:
@@ -185,7 +178,7 @@ def create_bash_fix_str(rule, include_echo):
 	result += rule.fix
 	return result
 
-def add_write_to_mobile_config_profile_file(item, name, path, separate_fix, include_echo):
+def add_write_to_mobileconfig_profile_file(item, name, path, separate_fix, include_echo):
 	add_config_profile_for_install(item, name, path, separate_fix, include_echo)
 	add_config_profile_for_uninstall(item, name, path, include_echo)
 
@@ -304,9 +297,9 @@ def get_config(config_path, prefix, suffix, version):
 def check_config(config):
 	if type(config) == dict:
 		keys = config.keys()
-		if set(keys).issubset({"fields_from_rule", "static_fields", "metadata", "prefix", "suffix", "version", "delimiter", "mobile_config_file", "check_prefix"}):
+		if set(keys).issubset({"fields_from_rule", "static_fields", "metadata", "prefix", "suffix", "version", "delimiter", "mobileconfig_file", "check_prefix"}):
 			for key in keys:
-				if key in ["prefix", "suffix", "delimiter", "mobile_config_file", "check_prefix"]:
+				if key in ["prefix", "suffix", "delimiter", "mobileconfig_file", "check_prefix"]:
 					if type(config[key]) != str:
 						logging.error(f"Unexpected format of config file. {key} is expected to be type string but is type {type(config[key])}. Please update config file.")
 						sys.exit(1)
@@ -355,12 +348,12 @@ def add_default_config_values(config):
 		config["static_fields"]["unattended_install"] = True
 		logging.warning("unattended_install not specified for munki items. Default (True) will be used.")
 
-def update_mobile_config_path(path, config):
+def update_mobileconfig_path(path, config):
 	if path:
 		return path
-	if "mobile_config_file" not in config:
+	if "mobileconfig_file" not in config:
 		return None
-	return config["mobile_config_file"]
+	return config["mobileconfig_file"]
 
 # # ----------------------------------------
 # #                Markdown
@@ -387,7 +380,7 @@ def md_add_note(s, note):
 				s += f"    * {line}\n"
 	return s
 
-def md_add_mobile_config_descr(s, info):
+def md_add_mobileconfig_descr(s, info):
 	for mobileconfigpayload in info:
 		s += f"    * In preference domain {mobileconfigpayload.payload_type}:\n"
 		for d in mobileconfigpayload.payload_content:
@@ -413,7 +406,7 @@ def md_description(script_summary):
 		for name, info, note in script_summary["config_items_made"]:
 			s += f"* {name}\n"
 			s = md_add_note(s, note)
-			s = md_add_mobile_config_descr(s, info)
+			s = md_add_mobileconfig_descr(s, info)
 		s += "\n\n"
 
 	if len(script_summary["items_made"]) + len(script_summary["items_skipped"]) < 1:
@@ -427,7 +420,7 @@ def md_description(script_summary):
 			for name, info, note in script_summary["items_skipped"]:
 				s += f"* {name}\n"
 				s = md_add_note(s, note)
-				s = md_add_mobile_config_descr(s, info)
+				s = md_add_mobileconfig_descr(s, info)
 			s += "\n\n"
 
 		if len(script_summary["rules_no_fix"]) > 0:
@@ -520,20 +513,20 @@ def process_options():
 						help="Write fix script in preinstall_script, rather than in installcheck_script.")
 	parser.add_option("--no-munki-output", dest="no_echo", action="store_true",
 						help="Prevent munki items from using echo statements to log their checks and fixes.")
-	parser.add_option("--mobile-config-file", dest="mobile_config_path",
+	parser.add_option("--mobileconfig-file", dest="mobileconfig_path",
 						help="Optional path to the file where munki items will write to if their fix can only be implemented by a configuration profile. Specifying a file path here will override a file given in the configuration yaml file.")
 	parser.add_option("--markdown", dest="md_path", default=MD_PATH,
 						help=f"Optional file name to print markdown summary of how the rules were processed by this script. Defaults to {MD_PATH}")
 	options, _ = parser.parse_args()
 	check_path(options.mscp_path, "mSCP directory", "-m or -mscp_dir")
 	check_path(options.baseline_path, "baseline yaml file", "-b or -baseline_path")
-	return options.mscp_path, options.baseline_path, options.config_path, options.output_path, options.prefix, options.suffix, options.version, options.separate_fix, not options.no_echo, options.mobile_config_path, options.md_path
+	return options.mscp_path, options.baseline_path, options.config_path, options.output_path, options.prefix, options.suffix, options.version, options.separate_fix, not options.no_echo, options.mobileconfig_path, options.md_path
 
 
 def main():
 	setup_logging()
 
-	mscp_path, baseline_path, config_path, output_path, prefix, suffix, version, separate_fix, include_echo, mobile_config_path, md_path = process_options()
+	mscp_path, baseline_path, config_path, output_path, prefix, suffix, version, separate_fix, include_echo, mobileconfig_path, md_path = process_options()
 	# get config
 	config = get_config(config_path, prefix, suffix, version)
 	# store paths
@@ -541,9 +534,9 @@ def main():
 	baseline_path = os.path.abspath(baseline_path)
 	output_path = os.path.abspath(output_path)
 	md_path = os.path.abspath(md_path)
-	mobile_config_path = update_mobile_config_path(mobile_config_path, config)
-	if mobile_config_path:
-		mobile_config_path = os.path.abspath(mobile_config_path)
+	mobileconfig_path = update_mobileconfig_path(mobileconfig_path, config)
+	if mobileconfig_path:
+		mobileconfig_path = os.path.abspath(mobileconfig_path)
 	# output dir
 	prep_munki_item_dir(output_path)
 	# prep summary
@@ -558,7 +551,7 @@ def main():
 	logging.info("Successfully loaded baseline.")
 	for profile in baseline.profile:
 		for rule in profile.rules:
-			process_rule(rule, config, separate_fix, include_echo, mobile_config_path, output_path, script_summary)
+			process_rule(rule, config, separate_fix, include_echo, mobileconfig_path, output_path, script_summary)
 
 	write_md_file(md_path, script_summary)
 
