@@ -113,19 +113,20 @@ def create_munki_item(rule, config, separate_fix, include_echo, mobile_config_pa
 			sys.exit(1)
 	# fix is code
 	else:
-		add_check_fix_scripts(item, rule, separate_fix, include_echo)
+		add_check_fix_scripts(item, rule, separate_fix, include_echo, config["check_prefix"])
 	# write
 	write_munki_item(f"{munki_item_name_file_name}.plist", output_path, item)
 
-def add_check_fix_scripts(item, rule, separate_fix, include_echo):
+def add_check_fix_scripts(item, rule, separate_fix, include_echo, check_prefix):
 	prefix_code = ""
 	if BASH_INDICATOR in rule.discussion:
 		prefix_code = get_code_from_discussion(rule.discussion)
+	check_prefix = (check_prefix + "\n" + prefix_code).rstrip("\n")
 	if separate_fix:
-		add_check_to_installcheck(item, rule, prefix_code, include_echo)
+		add_check_to_installcheck(item, rule, check_prefix, include_echo)
 		add_fix_to_preinstall(item, rule, prefix_code, include_echo)
 	else:
-		add_check_and_fix_to_installcheck(item, rule, prefix_code, include_echo)
+		add_check_and_fix_to_installcheck(item, rule, check_prefix, include_echo)
 
 def create_if_else_script(shebang, prefix, comp, if_script, else_script, ends_with_exit1 = True):
 	s = shebang 
@@ -303,9 +304,9 @@ def get_config(config_path, prefix, suffix, version):
 def check_config(config):
 	if type(config) == dict:
 		keys = config.keys()
-		if set(keys).issubset({"fields_from_rule", "static_fields", "metadata", "prefix", "suffix", "version", "delimiter", "mobile_config_file"}):
+		if set(keys).issubset({"fields_from_rule", "static_fields", "metadata", "prefix", "suffix", "version", "delimiter", "mobile_config_file", "check_prefix"}):
 			for key in keys:
-				if key in ["prefix", "suffix", "delimiter", "mobile_config_file"]:
+				if key in ["prefix", "suffix", "delimiter", "mobile_config_file", "check_prefix"]:
 					if type(config[key]) != str:
 						logging.error(f"Unexpected format of config file. {key} is expected to be type string but is type {type(config[key])}. Please update config file.")
 						sys.exit(1)
@@ -341,6 +342,8 @@ def format_prefix_suffix(config, prefix, suffix, version):
 def add_default_config_values(config):
 	if "delimiter" not in config:
 		config["delimiter"] = "-"
+	if "check_prefix" not in config:
+		config["check_prefix"] = ""
 	if "static_fields" not in config:
 		config["static_fields"] = {"installer_type" : "nopkg", "unattended_install": True}
 		logging.warning("installer_type not specified for munki items. Default (nopkg) will be used.")
@@ -485,10 +488,10 @@ def setup_logging():
 
 def check_path(path, s, flag):
 	if not path:
-		logging.error(f"No path to the {description} given. Please provide this with {flag}.")
+		logging.error(f"No path to the {s} given. Please provide this with {flag}.")
 		sys.exit(1)
 	if not os.path.exists(path):
-		logging.error(f"Provided path to the {description} does not exist. Please provide the path with {flag}.")
+		logging.error(f"Provided path to the {s} does not exist. Please provide the path with {flag}.")
 		logging.error(f"Path provided: {path}")
 		sys.exit(1)
 
@@ -501,14 +504,8 @@ def process_options():
 	parser.set_usage("Usage: %prog [options]")
 	parser.add_option("--mscp_dir", "-m", dest="mscp_path",
 						help="Path to the mscp dir https://github.com/usnistgov/macos_security. Will use rules, baselines and customs found in this dir if paths are not otherwise specified.")
-	# parser.add_option("--platform", "-p", dest="platform", default="macOS",
-						# help="Optional platform for the script to look at. Defaults to 'macOS', but can also be 'iOS', or 'visionOS', although these options do not currently generate monkey items as they do not have shell fixes.")
-# 	parser.add_option("--target", "-t", dest="target",
-# # 						help="Mandatory target version of OS.")
 	parser.add_option("--baseline-path", "-b", dest="baseline_path",
 						help="Path to baseline yaml file.")
-	# parser.add_option("--baseline-name", "-n", dest="baseline_name",
-	# 					help="Optional name of baseline yaml file.")
 	parser.add_option("--config", "-c", dest="config_path",
 						help=f"Optional path to the configuration yaml file, which specifies values for the munki item. Defaults to {CONFIG_PATH}")
 	parser.add_option("--outputdir", "-o", dest="output_path", default=OUTPUT_PATH,
