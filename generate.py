@@ -255,14 +255,14 @@ def get_code_from_discussion(discussion):
 def write_munki_item(name, output_path, item):
 	item_path = os.path.join(output_path, name)
 	# open file
-	with open(item_path, "wb+") as fp:
+	with open(item_path, "wb+") as file:
 		try:
 			# make sure we are at start of file
-			fp.seek(0)
+			file.seek(0)
 			# write to file
-			plistlib.dump(item, fp, fmt=plistlib.FMT_XML, sort_keys=False)
+			plistlib.dump(item, file, fmt=plistlib.FMT_XML, sort_keys=False)
 			# remove any excess of old file
-			fp.truncate()
+			file.truncate()
 		except Exception as e:
 			logging.error(f"Could not write to file {item_path} in munki directory.")
 			logging.error(e, exc_info=True)
@@ -360,15 +360,8 @@ def update_mobileconfig_path(path, config):
 # # ----------------------------------------
 def write_md_file(md_file, script_summary):
 	md = md_description(script_summary)
-	try:
-		f = open(md_file, "w")
-		f.write(md)
-		f.close()
-		logging.info("Markdown file successfully updated.")
-	except Exception as e:
-		logging.error(f"Unable to write to {md_file}")
-		logging.error(e, exc_info=True)
-		sys.exit(1)
+	write_file(md_file, md)
+	logging.info("Markdown file successfully updated.")
 
 def md_add_note(s, note):
 	if note:
@@ -440,37 +433,94 @@ def md_description(script_summary):
 # # ----------------------------------------
 # #           mSCP imports
 # # ----------------------------------------
+def update_mscp_config(path):
+	global original_mscp_config
+	mscp_config_path = os.path.join(path, "config/config.yaml")
+	original_mscp_config = read_file(mscp_config_path)
+	mscp_config = read_yaml(mscp_config_path)
+	update_mscp_config_dict(mscp_config, path)
+	write_yaml(mscp_config_path, mscp_config)
+
+def update_mscp_config_dict(d, path):
+	for k in d:
+		if isinstance(d[k], str):
+			if k.endswith("config") or k.endswith("dir") or k.endswith("data") or k.endswith("file"):
+				d[k] = str(os.path.join(path, d[k])) 
+		elif isinstance(d[k], dict):
+			update_mscp_config_dict(d[k], path)
+
 def mscp_imports(path):
-	global Baseline, Rule
+	global Baseline
+	update_mscp_config(path)
 	try:
 		sys.path.append(os.path.abspath(path))
-		os.chdir(path)
 		logging.info("Importing from mSCP directory...")
-		import src.mscp.classes.baseline
 		from src.mscp.classes.baseline import Baseline
-		# from src.mscp.classes.macsecurityrule import Macsecurityrule as Rule
 		logging.info("Successfully finished importing from mSCP directory.")
 	except Exception as e:
 		logging.error(f"Unable to import necessary classes from {path}. This directory should correspond to https://github.com/usnistgov/macos_security.")
 		logging.error(e, exc_info=True)
 		sys.exit(1)
 
+def revert_mscp_config(path):
+	write_file(os.path.join(path, "config/config.yaml"), original_mscp_config)
+
 
 # # ----------------------------------------
 # #           Helper functions
 # # ----------------------------------------
-def read_yaml(file_path) -> dict:
-	if not os.access(file_path, os.R_OK):
-		logging.error(f"No access to {file_path}")
+def read_yaml(path) -> dict:
+	if not os.access(path, os.R_OK):
+		logging.error(f"No access to {path}")
 		sys.exit(1)	
-	with open(file_path, "r") as file_yaml:
+	with open(path, "rb") as file_yaml:
 		try:
 			result = yaml.safe_load(file_yaml)
 			return result
 		except yaml.YAMLError as e:
-			logging.error(f"Unable to load {file_path}")
+			logging.error(f"Unable to load {path}")
 			logging.error(e, exc_info=True)
 			sys.exit(1)
+
+def write_yaml(path, d):
+	if not os.access(path, os.W_OK):
+		logging.error(f"No write access to {path}")
+		sys.exit(1)	
+	with open(path, "w") as file:
+		try:
+			yaml.dump(d, file, default_flow_style=False, explicit_start=True)
+		except Exception as e:
+			logging.error(f"Unable to write to {path}")
+			logging.error(e, exc_info=True)
+			sys.exit(1) 
+
+def read_file(path):
+	if not os.access(path, os.R_OK):
+		logging.error(f"No access to {path}")
+		sys.exit(1)	
+	with open(path, 'r') as file:
+		try:
+			result = file.read()
+			return result
+		except Exception as e:
+			logging.error(f"Unable to read {path}")
+			logging.error(e, exc_info=True)
+			sys.exit(1)
+
+def write_file(path, s):
+	if not os.access(path, os.W_OK):
+		logging.error(f"No write access to {path}")
+		sys.exit(1)	
+	with open(path, "w") as file:
+		try:
+			file.seek(0)
+			file.write(s)
+			file.truncate()
+		except Exception as e:
+			logging.error(f"Unable to write to {path}")
+			logging.error(e, exc_info=True)
+			sys.exit(1) 
+
 
 def setup_logging():
 	logging.basicConfig(
@@ -529,19 +579,13 @@ def main():
 	mscp_path, baseline_path, config_path, output_path, prefix, suffix, version, separate_fix, include_echo, mobileconfig_path, md_path = process_options()
 	# get config
 	config = get_config(config_path, prefix, suffix, version)
-	# store paths
-	wd = os.getcwd()
-	baseline_path = os.path.abspath(baseline_path)
-	output_path = os.path.abspath(output_path)
-	md_path = os.path.abspath(md_path)
+	# update mobileconfig_path from config
 	mobileconfig_path = update_mobileconfig_path(mobileconfig_path, config)
-	if mobileconfig_path:
-		mobileconfig_path = os.path.abspath(mobileconfig_path)
 	# output dir
 	prep_munki_item_dir(output_path)
 	# prep summary
 	script_summary = {"items_made":[], "config_items_made":[], "items_skipped":[], "rules_no_fix":[]}
-	# import clases (and change working dir)
+	# import clases
 	mscp_imports(mscp_path)
 
 	# process relevant rules
@@ -552,8 +596,11 @@ def main():
 	for profile in baseline.profile:
 		for rule in profile.rules:
 			process_rule(rule, config, separate_fix, include_echo, mobileconfig_path, output_path, script_summary)
-
+	# summarise job
 	write_md_file(md_path, script_summary)
+
+	# change mscp dir back to original state
+	revert_mscp_config(mscp_path)
 
 
 if __name__ == "__main__":
