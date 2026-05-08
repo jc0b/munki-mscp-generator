@@ -433,39 +433,19 @@ def md_description(script_summary):
 # # ----------------------------------------
 # #           mSCP imports
 # # ----------------------------------------
-def update_mscp_config(path):
-	global original_mscp_config
-	mscp_config_path = os.path.join(path, "src/mscp/data/config.yaml")
-	original_mscp_config = read_file(mscp_config_path)
-	mscp_config = read_yaml(mscp_config_path)
-	mscp_config["custom_dir"] = str(os.path.join(path, mscp_config["custom_dir"])) 
-	# update_mscp_config_dict(mscp_config, path)
-	write_yaml(mscp_config_path, mscp_config)
-
-# def update_mscp_config_dict(d, path):
-# 	for k in d:
-# 		if isinstance(d[k], str):
-# 			if k.endswith("config") or k.endswith("dir") or k.endswith("data") or k.endswith("file"):
-# 				d[k] = str(os.path.join(path, d[k])) 
-# 		elif isinstance(d[k], dict):
-# 			update_mscp_config_dict(d[k], path)
-
-def mscp_imports(path):
+def mscp_imports(path, custom):
 	global Baseline
-	update_mscp_config(path)
 	try:
 		sys.path.append(os.path.abspath(path))
 		logging.info("Importing from mSCP directory...")
+		from src.mscp.common_utils.config import set_custom_dir 
+		set_custom_dir(custom)
 		from src.mscp.classes.baseline import Baseline
 		logging.info("Successfully finished importing from mSCP directory.")
 	except Exception as e:
 		logging.error(f"Unable to import necessary classes from {path}. This directory should correspond to https://github.com/usnistgov/macos_security.")
 		logging.error(e, exc_info=True)
 		sys.exit(1)
-
-def revert_mscp_config(path):
-	write_file(os.path.join(path, "src/mscp/data/config.yaml"), original_mscp_config)
-
 
 # # ----------------------------------------
 # #           Helper functions
@@ -552,6 +532,8 @@ def process_options():
 						help="Path to baseline yaml file.")
 	parser.add_option("--config", "-c", dest="config_path",
 						help=f"Optional path to the configuration yaml file, which specifies values for the munki item. Defaults to {CONFIG_PATH}")
+	parser.add_option("--custom", dest="custom_path",
+						help=f"Optional path to the custom folder. Defaults to /custom locally in the provided mscp directory.")
 	parser.add_option("--outputdir", "-o", dest="output_path", default=OUTPUT_PATH,
 						help=f"Optional path to the directory generated munki files should be written to. Defaults to {OUTPUT_PATH}")
 	parser.add_option("--prefix", dest="prefix",
@@ -571,23 +553,25 @@ def process_options():
 	options, _ = parser.parse_args()
 	check_path(options.mscp_path, "mSCP directory", "-m or -mscp_dir")
 	check_path(options.baseline_path, "baseline yaml file", "-b or -baseline_path")
-	return options.mscp_path, options.baseline_path, options.config_path, options.output_path, options.prefix, options.suffix, options.version, options.separate_fix, not options.no_echo, options.mobileconfig_path, options.md_path
+	if not options.custom_path:
+		options.custom_path = os.path.join(options.mscp_path, "custom")
+	return options.mscp_path, options.baseline_path, options.config_path, options.custom_path, options.output_path, options.prefix, options.suffix, options.version, options.separate_fix, not options.no_echo, options.mobileconfig_path, options.md_path
 
 
 def main():
 	setup_logging()
 
-	mscp_path, baseline_path, config_path, output_path, prefix, suffix, version, separate_fix, include_echo, mobileconfig_path, md_path = process_options()
+	mscp_path, baseline_path, config_path, custom_path, output_path, prefix, suffix, version, separate_fix, include_echo, mobileconfig_path, md_path = process_options()
 	# get config
 	config = get_config(config_path, prefix, suffix, version)
-	# update mobileconfig_path from config
+	# updates from config
 	mobileconfig_path = update_mobileconfig_path(mobileconfig_path, config)
 	# output dir
 	prep_munki_item_dir(output_path)
 	# prep summary
 	script_summary = {"items_made":[], "config_items_made":[], "items_skipped":[], "rules_no_fix":[]}
 	# import clases
-	mscp_imports(mscp_path)
+	mscp_imports(mscp_path, custom_path)
 
 	# process relevant rules
 	check_path(baseline_path, "baseline yaml file", "-b or -baseline_path")
@@ -599,9 +583,6 @@ def main():
 			process_rule(rule, config, separate_fix, include_echo, mobileconfig_path, output_path, script_summary)
 	# summarise job
 	write_md_file(md_path, script_summary)
-
-	# change mscp dir back to original state
-	revert_mscp_config(mscp_path)
 
 
 if __name__ == "__main__":
