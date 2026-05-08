@@ -435,19 +435,20 @@ def md_description(script_summary):
 # # ----------------------------------------
 def update_mscp_config(path):
 	global original_mscp_config
-	mscp_config_path = os.path.join(path, "config/config.yaml")
+	mscp_config_path = os.path.join(path, "src/mscp/data/config.yaml")
 	original_mscp_config = read_file(mscp_config_path)
 	mscp_config = read_yaml(mscp_config_path)
-	update_mscp_config_dict(mscp_config, path)
+	mscp_config["custom_dir"] = str(os.path.join(path, mscp_config["custom_dir"])) 
+	# update_mscp_config_dict(mscp_config, path)
 	write_yaml(mscp_config_path, mscp_config)
 
-def update_mscp_config_dict(d, path):
-	for k in d:
-		if isinstance(d[k], str):
-			if k.endswith("config") or k.endswith("dir") or k.endswith("data") or k.endswith("file"):
-				d[k] = str(os.path.join(path, d[k])) 
-		elif isinstance(d[k], dict):
-			update_mscp_config_dict(d[k], path)
+# def update_mscp_config_dict(d, path):
+# 	for k in d:
+# 		if isinstance(d[k], str):
+# 			if k.endswith("config") or k.endswith("dir") or k.endswith("data") or k.endswith("file"):
+# 				d[k] = str(os.path.join(path, d[k])) 
+# 		elif isinstance(d[k], dict):
+# 			update_mscp_config_dict(d[k], path)
 
 def mscp_imports(path):
 	global Baseline
@@ -463,7 +464,7 @@ def mscp_imports(path):
 		sys.exit(1)
 
 def revert_mscp_config(path):
-	write_file(os.path.join(path, "config/config.yaml"), original_mscp_config)
+	write_file(os.path.join(path, "src/mscp/data/config.yaml"), original_mscp_config)
 
 
 # # ----------------------------------------
