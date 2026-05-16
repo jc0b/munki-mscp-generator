@@ -35,6 +35,23 @@ DEFAULT_CONFIG = {
 }
 
 # # ----------------------------------------
+# #           mSCP imports
+# # ----------------------------------------
+def mscp_imports(path, custom_dir):
+	global Baseline
+	try:
+		sys.path.append(os.path.abspath(path))
+		logging.info("Importing from mSCP directory...")
+		from src.mscp.common_utils.config import set_custom_dir 
+		set_custom_dir(custom_dir)
+		from src.mscp.classes.baseline import Baseline
+		logging.info("Successfully finished importing from mSCP directory.")
+	except Exception as e:
+		logging.error(f"Unable to import necessary classes from {path}. This directory should correspond to https://github.com/usnistgov/macos_security.")
+		logging.error(e, exc_info=True)
+		sys.exit(1)
+
+# # ----------------------------------------
 # #              Rules
 # # ----------------------------------------
 
@@ -255,18 +272,22 @@ def get_code_from_discussion(discussion):
 def write_munki_item(name, output_path, item):
 	item_path = os.path.join(output_path, name)
 	# open file
-	with open(item_path, "wb+") as file:
-		try:
-			# make sure we are at start of file
-			file.seek(0)
-			# write to file
-			plistlib.dump(item, file, fmt=plistlib.FMT_XML, sort_keys=False)
-			# remove any excess of old file
-			file.truncate()
-		except Exception as e:
-			logging.error(f"Could not write to file {item_path} in munki directory.")
-			logging.error(e, exc_info=True)
-			sys.exit(1)
+	try:
+		with open(item_path, "wb") as file:
+			try:
+				# make sure we are at start of file
+				file.seek(0)
+				# write to file
+				plistlib.dump(item, file, fmt=plistlib.FMT_XML, sort_keys=False)
+				# remove any excess of old file
+				file.truncate()
+			except Exception as e:
+				logging.error(f"Could not write to file {item_path} in munki directory.")
+				logging.error(e, exc_info=True)
+				sys.exit(1)
+	except PermissionError as e:
+		logging.error(f"No write access to {path}")
+		sys.exit(1)
 
 # # ----------------------------------------
 # #                Config 
@@ -431,77 +452,67 @@ def md_description(script_summary):
 	return s
 
 # # ----------------------------------------
-# #           mSCP imports
+# #           Helper functions
 # # ----------------------------------------
-def mscp_imports(path, custom):
-	global Baseline
+def read_yaml(path) -> dict:	
 	try:
-		sys.path.append(os.path.abspath(path))
-		logging.info("Importing from mSCP directory...")
-		from src.mscp.common_utils.config import set_custom_dir 
-		set_custom_dir(custom)
-		from src.mscp.classes.baseline import Baseline
-		logging.info("Successfully finished importing from mSCP directory.")
-	except Exception as e:
-		logging.error(f"Unable to import necessary classes from {path}. This directory should correspond to https://github.com/usnistgov/macos_security.")
+		with open(path, "rb") as file_yaml:
+			try:
+				result = yaml.safe_load(file_yaml)
+				return result
+			except yaml.YAMLError as e:
+				logging.error(f"Unable to load {path}")
+				logging.error(e, exc_info=True)
+				sys.exit(1)
+	except PermissionError as e:
+		logging.error(f"No access to {path}")
 		logging.error(e, exc_info=True)
 		sys.exit(1)
 
-# # ----------------------------------------
-# #           Helper functions
-# # ----------------------------------------
-def read_yaml(path) -> dict:
-	if not os.access(path, os.R_OK):
-		logging.error(f"No access to {path}")
-		sys.exit(1)	
-	with open(path, "rb") as file_yaml:
-		try:
-			result = yaml.safe_load(file_yaml)
-			return result
-		except yaml.YAMLError as e:
-			logging.error(f"Unable to load {path}")
-			logging.error(e, exc_info=True)
-			sys.exit(1)
-
 def write_yaml(path, d):
-	if not os.access(path, os.W_OK):
+	try:
+		with open(path, "w") as file:
+			try:
+				yaml.dump(d, file, default_flow_style=False, explicit_start=True)
+			except Exception as e:
+				logging.error(f"Unable to write to {path}")
+				logging.error(e, exc_info=True)
+				sys.exit(1) 
+	except PermissionError as e:
 		logging.error(f"No write access to {path}")
+		logging.error(e, exc_info=True)
 		sys.exit(1)	
-	with open(path, "w") as file:
-		try:
-			yaml.dump(d, file, default_flow_style=False, explicit_start=True)
-		except Exception as e:
-			logging.error(f"Unable to write to {path}")
-			logging.error(e, exc_info=True)
-			sys.exit(1) 
 
 def read_file(path):
-	if not os.access(path, os.R_OK):
+	try:
+		with open(path, 'r') as file:
+			try:
+				result = file.read()
+				return result
+			except Exception as e:
+				logging.error(f"Unable to read {path}")
+				logging.error(e, exc_info=True)
+				sys.exit(1)
+	except PermissionError as e:
 		logging.error(f"No access to {path}")
+		logging.error(e, exc_info=True)
 		sys.exit(1)	
-	with open(path, 'r') as file:
-		try:
-			result = file.read()
-			return result
-		except Exception as e:
-			logging.error(f"Unable to read {path}")
-			logging.error(e, exc_info=True)
-			sys.exit(1)
 
 def write_file(path, s):
-	if not os.access(path, os.W_OK):
+	try:	
+		with open(path, "w") as file:
+			try:
+				file.seek(0)
+				file.write(s)
+				file.truncate()
+			except Exception as e:
+				logging.error(f"Unable to write to {path}")
+				logging.error(e, exc_info=True)
+				sys.exit(1) 
+	except PermissionError as e:
 		logging.error(f"No write access to {path}")
+		logging.error(e, exc_info=True)
 		sys.exit(1)	
-	with open(path, "w") as file:
-		try:
-			file.seek(0)
-			file.write(s)
-			file.truncate()
-		except Exception as e:
-			logging.error(f"Unable to write to {path}")
-			logging.error(e, exc_info=True)
-			sys.exit(1) 
-
 
 def setup_logging():
 	logging.basicConfig(
@@ -533,7 +544,7 @@ def process_options():
 	parser.add_option("--config", "-c", dest="config_path",
 						help=f"Optional path to the configuration yaml file, which specifies values for the munki item. Defaults to {CONFIG_PATH}")
 	parser.add_option("--custom", dest="custom_path",
-						help=f"Optional path to the custom folder. Defaults to /custom locally in the provided mscp directory.")
+						help=f"Optional path to the custom folder. Defaults to /custom in the provided mscp directory.")
 	parser.add_option("--outputdir", "-o", dest="output_path", default=OUTPUT_PATH,
 						help=f"Optional path to the directory generated munki files should be written to. Defaults to {OUTPUT_PATH}")
 	parser.add_option("--prefix", dest="prefix",
@@ -557,7 +568,6 @@ def process_options():
 		options.custom_path = os.path.join(options.mscp_path, "custom")
 	return options.mscp_path, options.baseline_path, options.config_path, options.custom_path, options.output_path, options.prefix, options.suffix, options.version, options.separate_fix, not options.no_echo, options.mobileconfig_path, options.md_path
 
-
 def main():
 	setup_logging()
 
@@ -566,12 +576,12 @@ def main():
 	config = get_config(config_path, prefix, suffix, version)
 	# updates from config
 	mobileconfig_path = update_mobileconfig_path(mobileconfig_path, config)
-	# output dir
-	prep_munki_item_dir(output_path)
 	# prep summary
 	script_summary = {"items_made":[], "config_items_made":[], "items_skipped":[], "rules_no_fix":[]}
 	# import clases
 	mscp_imports(mscp_path, custom_path)
+	# output dir
+	prep_munki_item_dir(output_path)
 
 	# process relevant rules
 	check_path(baseline_path, "baseline yaml file", "-b or -baseline_path")
