@@ -444,11 +444,11 @@ def md_description(script_summary):
 				s = md_add_note(s, note)
 			s += "\n\n"
 
-	s = s.replace("&", "\&")
-	s = s.replace("[", "\[")
-	s = s.replace("<", "\<")
+	s = s.replace("&", "\\&")
+	s = s.replace("[", "\\[")
+	s = s.replace("<", "\\<")
 	s = s.replace("]\n    * `\n    *", "\\<")
-	s = s.replace("----", "\----")
+	s = s.replace("----", "\\----")
 	return s
 
 # # ----------------------------------------
