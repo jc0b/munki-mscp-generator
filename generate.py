@@ -577,13 +577,13 @@ def process_options():
 	parser = optparse.OptionParser()
 	parser.set_usage("Usage: %prog [options]")
 	parser.add_option("--mscp_dir", "-m", dest="mscp_path",
-						help="Optional path to the mscp directory https://github.com/usnistgov/macos_security. Will use rules, baselines and customs found in this dir if paths are not otherwise specified. If this arg is not provided, mscp MUST be pip installed with `pip install git+https://github.com/usnistgov/macos_security`")
+						help="Optional path to the mSCP directory https://github.com/usnistgov/macos_security. Will use rules, baselines and customs found in this dir if paths are not otherwise specified. If this arg is not provided, mscp MUST be pip installed with `pip install git+https://github.com/usnistgov/macos_security`")
 	parser.add_option("--baseline-path", "-b", dest="baseline_path",
 						help="Path to baseline yaml file.")
 	parser.add_option("--config", "-c", dest="config_path",
 						help=f"Optional path to the configuration yaml file, which specifies values for the munki item. Defaults to {CONFIG_PATH}")
 	parser.add_option("--custom", dest="custom_path",
-						help=f"Optional path to the custom directory. Defaults to /custom within the provided mscp directory, if this directory is provided. Otherise defaults to ./custom in the cwd.")
+						help=f"Optional path to the custom directory. Defaults to /custom within the provided mSCP directory, if this directory is provided. Otherise defaults to ./custom in the cwd.")
 	parser.add_option("--outputdir", "-o", dest="output_path", default=OUTPUT_PATH,
 						help=f"Optional path to the directory generated munki files should be written to. Defaults to {OUTPUT_PATH}")
 	parser.add_option("--prefix", dest="prefix",
