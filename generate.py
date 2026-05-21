@@ -39,17 +39,30 @@ DEFAULT_CONFIG = {
 # # ----------------------------------------
 def mscp_imports(path, custom_dir):
 	global Baseline
-	try:
-		sys.path.append(os.path.abspath(path))
-		logging.info("Importing from mSCP directory...")
-		from src.mscp.common_utils.config import set_custom_dir 
-		set_custom_dir(custom_dir)
-		from src.mscp.classes.baseline import Baseline
-		logging.info("Successfully finished importing from mSCP directory.")
-	except Exception as e:
-		logging.error(f"Unable to import necessary classes from {path}. This directory should correspond to https://github.com/usnistgov/macos_security.")
-		logging.error(e, exc_info=True)
-		sys.exit(1)
+	# if path import from there
+	if path:
+		try:
+			sys.path.append(os.path.abspath(path))
+			logging.info("Importing from mSCP directory...")
+			from src.mscp.common_utils.config import set_custom_dir 
+			from src.mscp.classes.baseline import Baseline
+			logging.info("Successfully finished importing from mSCP directory.")
+		except Exception as e:
+			logging.error(f"Unable to make necessary imports from {path}. This directory should correspond to https://github.com/usnistgov/macos_security.")
+			logging.error(e, exc_info=True)
+			sys.exit(1)
+	else:
+		# else expect pip install
+		try:
+			logging.info("Importing from mSCP pip library...")
+			from mscp.common_utils.config import set_custom_dir 
+			from mscp.classes.baseline import Baseline
+			logging.info("Successfully finished importing from mSCP pip library.")
+		except Exception as e:
+			logging.error(f"Unable to import from mSCP. Please pip install this library with `pip install git+https://github.com/usnistgov/macos_security@dev_2.0` or provide the location of the mSCP dir with -m")
+			logging.error(e, exc_info=True)
+			sys.exit(1)
+	set_custom_dir(custom_dir)
 
 # # ----------------------------------------
 # #              Rules
@@ -63,7 +76,7 @@ def process_rule(rule, config, separate_fix, include_echo, mobileconfig_path, ou
 	if "warning:" in rule.discussion.lower():
 		n = rule.discussion.lower().find("warning:") 
 		note2 = rule.discussion[n:].strip()
-		logging.warning(f"Rule {rule.rule_id} comes with the following warning:\n\t{note2}\n\tNote that despite the warning a munki item has been created for {rule.rule_id}. If you wish to remove this rule, please do so in the baseline.\n\n")
+		logging.warning(f"Rule {rule.rule_id} comes with the following warning:\n\t\t\t{note2}\n\t\t\tDespite the warning a munki item has been created for {rule.rule_id}.\n\t\t\tIf you wish to remove this rule, please do so in the baseline.")
 		if note:
 			if len(note2) > len(note):
 				note = note2
@@ -93,7 +106,7 @@ def create_munki_item(rule, config, separate_fix, include_echo, mobileconfig_pat
 	# name
 	munki_item_name = get_munki_item_name(rule.rule_id, config)
 	item["name"] = munki_item_name
-	munki_item_name_file_name = munki_item_name
+	munki_item_file_name = munki_item_name
 	# metadata
 	if "metadata" in config:
 		metadata = config["metadata"]
@@ -103,7 +116,7 @@ def create_munki_item(rule, config, separate_fix, include_echo, mobileconfig_pat
 		item["_metadata"] = metadata
 	# version
 	if "version" in config:
-		munki_item_name_file_name += f"{config['delimiter']}{config['version']}"
+		munki_item_file_name += f"{config['delimiter']}{config['version']}"
 		item["version"] = str(config["version"])
 	# non static keys
 	if "fields_from_rule" in config:
@@ -125,7 +138,7 @@ def create_munki_item(rule, config, separate_fix, include_echo, mobileconfig_pat
 	else:
 		add_check_fix_scripts(item, rule, separate_fix, include_echo, config["check_prefix"])
 	# write
-	write_munki_item(f"{munki_item_name_file_name}.plist", output_path, item)
+	write_munki_item(f"{munki_item_file_name}.plist", output_path, item)
 
 def add_check_fix_scripts(item, rule, separate_fix, include_echo, check_prefix):
 	prefix_code = ""
@@ -526,9 +539,35 @@ def check_path(path, s, flag):
 		logging.error(f"No path to the {s} given. Please provide this with {flag}.")
 		sys.exit(1)
 	if not os.path.exists(path):
-		logging.error(f"Provided path to the {s} does not exist. Please provide the path with {flag}.")
+		logging.error(f"Provided path to the {s} does not exist. Please provide the correct path with {flag}.")
 		logging.error(f"Path provided: {path}")
 		sys.exit(1)
+	return path
+
+def check_path_with_default(path, default, s, flag, required):
+	# not using default
+	if path:
+		if not os.path.exists(path):
+			logging.error(f"Provided path to the {s} does not exist. Please provide the correct path with {flag}.")
+			logging.error(f"Path provided: {path}")
+			sys.exit(1)
+		return path
+	# using default
+	else:
+		# default path exists
+		if os.path.exists(default):
+			logging.info(f"No path to the {s} given. Default path {default} will be used.")
+			return default
+		# default path does not exist
+		else:
+			# required default path does not exist -> error
+			if required:
+				logging.error(f"No path to the {s} given. Default path {default} does not exist. Please provide the correct path with {flag}.")
+				sys.exit(1)
+			# optional default path does not exist -> warning
+			else:
+				logging.warning(f"No path to the {s} given. Default path {default} does not exist. Continuing without {s}. If you would like to use {s} please provide the correct path with {flag}.")
+				return default
 
 # # ----------------------------------------
 # #                 Main
@@ -538,13 +577,13 @@ def process_options():
 	parser = optparse.OptionParser()
 	parser.set_usage("Usage: %prog [options]")
 	parser.add_option("--mscp_dir", "-m", dest="mscp_path",
-						help="Path to the mscp dir https://github.com/usnistgov/macos_security. Will use rules, baselines and customs found in this dir if paths are not otherwise specified.")
+						help="Optional path to the mscp directory https://github.com/usnistgov/macos_security. Will use rules, baselines and customs found in this dir if paths are not otherwise specified. If this arg is not provided, mscp MUST be pip installed with `pip install git+https://github.com/usnistgov/macos_security`")
 	parser.add_option("--baseline-path", "-b", dest="baseline_path",
 						help="Path to baseline yaml file.")
 	parser.add_option("--config", "-c", dest="config_path",
 						help=f"Optional path to the configuration yaml file, which specifies values for the munki item. Defaults to {CONFIG_PATH}")
 	parser.add_option("--custom", dest="custom_path",
-						help=f"Optional path to the custom folder. Defaults to /custom in the provided mscp directory.")
+						help=f"Optional path to the custom directory. Defaults to /custom within the provided mscp directory, if this directory is provided. Otherise defaults to ./custom in the cwd.")
 	parser.add_option("--outputdir", "-o", dest="output_path", default=OUTPUT_PATH,
 						help=f"Optional path to the directory generated munki files should be written to. Defaults to {OUTPUT_PATH}")
 	parser.add_option("--prefix", dest="prefix",
@@ -562,10 +601,12 @@ def process_options():
 	parser.add_option("--markdown", dest="md_path", default=MD_PATH,
 						help=f"Optional file name to print markdown summary of how the rules were processed by this script. Defaults to {MD_PATH}")
 	options, _ = parser.parse_args()
-	check_path(options.mscp_path, "mSCP directory", "-m or -mscp_dir")
+	if options.mscp_path:
+		check_path(options.mscp_path, "mSCP directory", "-m or -mscp_dir")
+		options.custom_path = check_path_with_default(options.custom_path, os.path.join(options.mscp_path, "custom"), "custom directory", "--custom", False)
+	else:
+		options.custom_path = check_path_with_default(options.custom_path, "./custom", "custom directory", "--custom", False)
 	check_path(options.baseline_path, "baseline yaml file", "-b or -baseline_path")
-	if not options.custom_path:
-		options.custom_path = os.path.join(options.mscp_path, "custom")
 	return options.mscp_path, options.baseline_path, options.config_path, options.custom_path, options.output_path, options.prefix, options.suffix, options.version, options.separate_fix, not options.no_echo, options.mobileconfig_path, options.md_path
 
 def main():
@@ -584,15 +625,18 @@ def main():
 	prep_munki_item_dir(output_path)
 
 	# process relevant rules
-	check_path(baseline_path, "baseline yaml file", "-b or -baseline_path")
 	logging.info("Loading baseline...")
 	baseline = Baseline.from_yaml(pathlib.Path(baseline_path), custom=True)
 	logging.info("Successfully loaded baseline.")
+	print("\n")
 	for profile in baseline.profile:
 		for rule in profile.rules:
 			process_rule(rule, config, separate_fix, include_echo, mobileconfig_path, output_path, script_summary)
 	# summarise job
+	print("\n")
 	write_md_file(md_path, script_summary)
+	logging.info(f"{len(script_summary['items_made'])} item(s) generated to {output_path}")
+	logging.info(f"See {md_path} for a summary of the run.")
 
 
 if __name__ == "__main__":

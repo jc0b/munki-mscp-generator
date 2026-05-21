@@ -1,11 +1,18 @@
 ---
-fields_from_rule:
-  display_name: "title"
-  description: "discussion"
+metadata:
+  created_by: "munki-mscp-generator"
+  creation_date: "today"
+version: 1.0
 static_fields:
   category: "Compliance"
   installer_type: "nopkg"
   unattended_install: True
-metadata:
-  created_by: "munki-mscp-generator"
-  creation_date: "today"
+fields_from_rule:
+  display_name: "title"
+  description: "discussion"
+
+
+
+
+
+
