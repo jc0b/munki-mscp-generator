@@ -2,7 +2,7 @@
 import datetime
 # import importlib.util
 import logging
-import optparse
+import argparse
 import os
 import pathlib
 import plistlib
@@ -572,47 +572,48 @@ def check_path_with_default(path, default, s, flag, required):
 # # ----------------------------------------
 # #                 Main
 # # ----------------------------------------
-
-def process_options():
-	parser = optparse.OptionParser()
-	parser.set_usage("Usage: %prog [options]")
-	parser.add_option("--mscp_dir", "-m", dest="mscp_path",
+def process_args():
+	parser = argparse.ArgumentParser(
+		description="`munki-mscp-generator` is a utility that can create Munki items from your macOS Security Compliance baselines.",
+		usage="%(prog)s [args]"
+	)
+	parser.add_argument("--mscp_dir", "-m", dest="mscp_path",
 						help="Optional path to the mSCP directory https://github.com/usnistgov/macos_security. Will use rules, baselines and customs found in this dir if paths are not otherwise specified. If this arg is not provided, mscp MUST be pip installed with `pip install git+https://github.com/usnistgov/macos_security`")
-	parser.add_option("--baseline-path", "-b", dest="baseline_path",
+	parser.add_argument("--baseline-path", "-b", dest="baseline_path",
 						help="Path to baseline yaml file.")
-	parser.add_option("--config", "-c", dest="config_path",
+	parser.add_argument("--config", "-c", dest="config_path",
 						help=f"Optional path to the configuration yaml file, which specifies values for the munki item. Defaults to {CONFIG_PATH}")
-	parser.add_option("--custom", dest="custom_path",
+	parser.add_argument("--custom", dest="custom_path",
 						help=f"Optional path to the custom directory. Defaults to /custom within the provided mSCP directory, if this directory is provided. Otherise defaults to ./custom in the cwd.")
-	parser.add_option("--outputdir", "-o", dest="output_path", default=OUTPUT_PATH,
+	parser.add_argument("--outputdir", "-o", dest="output_path", default=OUTPUT_PATH,
 						help=f"Optional path to the directory generated munki files should be written to. Defaults to {OUTPUT_PATH}")
-	parser.add_option("--prefix", dest="prefix",
+	parser.add_argument("--prefix", dest="prefix",
 						help=f"Optional prefix to add to the name of every generated munki item and it's file name.")
-	parser.add_option("--suffix", dest="suffix",
+	parser.add_argument("--suffix", dest="suffix",
 						help=f"Optional suffix to add to the name of every generated munki item and it's file name.")
-	parser.add_option("--version", "-v", dest="version",
+	parser.add_argument("--version", "-v", dest="version",
 						help=f"Optional version to be set in every munki item and appended to the name of every generated munki item. Specifying a version here will override a version given in the configuration yaml file.")
-	parser.add_option("--separate", "-s", dest="separate_fix", action="store_true",
+	parser.add_argument("--separate", "-s", dest="separate_fix", action="store_true",
 						help="Write fix script in preinstall_script, rather than in installcheck_script.")
-	parser.add_option("--no-munki-output", dest="no_echo", action="store_true",
+	parser.add_argument("--no-munki-output", dest="no_echo", action="store_true",
 						help="Prevent munki items from using echo statements to log their checks and fixes.")
-	parser.add_option("--mobileconfig-file", dest="mobileconfig_path",
+	parser.add_argument("--mobileconfig-file", dest="mobileconfig_path",
 						help="Optional path to the file where munki items will write to if their fix can only be implemented by a configuration profile. Specifying a file path here will override a file given in the configuration yaml file.")
-	parser.add_option("--markdown", dest="md_path", default=MD_PATH,
+	parser.add_argument("--markdown", dest="md_path", default=MD_PATH,
 						help=f"Optional file name to print markdown summary of how the rules were processed by this script. Defaults to {MD_PATH}")
-	options, _ = parser.parse_args()
-	if options.mscp_path:
-		check_path(options.mscp_path, "mSCP directory", "-m or -mscp_dir")
-		options.custom_path = check_path_with_default(options.custom_path, os.path.join(options.mscp_path, "custom"), "custom directory", "--custom", False)
+	args = parser.parse_args()
+	if args.mscp_path:
+		check_path(args.mscp_path, "mSCP directory", "-m or -mscp_dir")
+		args.custom_path = check_path_with_default(args.custom_path, os.path.join(args.mscp_path, "custom"), "custom directory", "--custom", False)
 	else:
-		options.custom_path = check_path_with_default(options.custom_path, "./custom", "custom directory", "--custom", False)
-	check_path(options.baseline_path, "baseline yaml file", "-b or -baseline_path")
-	return options.mscp_path, options.baseline_path, options.config_path, options.custom_path, options.output_path, options.prefix, options.suffix, options.version, options.separate_fix, not options.no_echo, options.mobileconfig_path, options.md_path
+		args.custom_path = check_path_with_default(args.custom_path, "./custom", "custom directory", "--custom", False)
+	check_path(args.baseline_path, "baseline yaml file", "-b or -baseline_path")
+	return args.mscp_path, args.baseline_path, args.config_path, args.custom_path, args.output_path, args.prefix, args.suffix, args.version, args.separate_fix, not args.no_echo, args.mobileconfig_path, args.md_path
 
 def main():
 	setup_logging()
 
-	mscp_path, baseline_path, config_path, custom_path, output_path, prefix, suffix, version, separate_fix, include_echo, mobileconfig_path, md_path = process_options()
+	mscp_path, baseline_path, config_path, custom_path, output_path, prefix, suffix, version, separate_fix, include_echo, mobileconfig_path, md_path = process_args()
 	# get config
 	config = get_config(config_path, prefix, suffix, version)
 	# updates from config
