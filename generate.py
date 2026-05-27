@@ -329,19 +329,19 @@ def get_config(config_path, prefix, suffix, version):
 	return result
 
 def check_config(config):
-	if type(config) == dict:
+	if isinstance(config, dict):
 		keys = config.keys()
 		if set(keys).issubset({"fields_from_rule", "static_fields", "metadata", "prefix", "suffix", "version", "delimiter", "mobileconfig_file", "check_prefix"}):
 			for key in keys:
 				if key in ["prefix", "suffix", "delimiter", "mobileconfig_file", "check_prefix"]:
-					if type(config[key]) != str:
+					if not isinstance(config[key], str):
 						logging.error(f"Unexpected format of config file. {key} is expected to be type string but is type {type(config[key])}. Please update config file.")
 						sys.exit(1)
 				elif key == "version":
-					if type(config[key]) != str and type(config[key]) != int and type(config[key]) != float:
+					if (not isinstance(config[key], str)) and (not isinstance(config[key], int)) and (not isinstance(config[key], float)):
 						logging.error(f"Unexpected format of config file. {key} is expected to be type string, int or float, but is type {type(config[key])}. Please update config file.")
 						sys.exit(1)
-				elif not type(config[key]) == dict:
+				elif not isinstance(config[key], dict):
 					logging.error(f"Unexpected format of config file. {key} is expected to be type dictionary but is type {type(config[key])}. Please update config file.")
 					sys.exit(1)
 		else:
