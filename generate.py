@@ -575,16 +575,16 @@ def process_args():
 		description="`munki-mscp-generator` is a utility that can create Munki items from your macOS Security Compliance baselines.",
 		usage="%(prog)s [args]"
 	)
-	parser.add_argument("--mscp-dir", "-m", dest="mscp_path",
-						help="Optional path to the mSCP directory https://github.com/usnistgov/macos_security. Will use rules, baselines and customs found in this dir if paths are not otherwise specified. If this arg is not provided, mscp MUST be pip installed with `pip install git+https://github.com/usnistgov/macos_security`")
-	parser.add_argument("--baseline-path", "-b", dest="baseline_path",
+	parser.add_argument("--baseline-file", "-b", dest="baseline_path",
 						help="Path to baseline yaml file.")
-	parser.add_argument("--config", "-c", dest="config_path",
+	parser.add_argument("--mscp-dir", "-m", dest="mscp_path",
+						help="Optional path to the mSCP directory https://github.com/usnistgov/macos_security. If this arg is not provided, mSCP MUST be pip installed with `pip install git+https://github.com/usnistgov/macos_security`")
+	parser.add_argument("--config-file", "-c", dest="config_path",
 						help=f"Optional path to the configuration yaml file, which specifies values for the munki item. Defaults to {CONFIG_PATH}")
 	parser.add_argument("--custom-dir", dest="custom_path",
 						help=f"Optional path to the custom directory. Defaults to /custom within the provided mSCP directory, if this directory is provided. Otherise defaults to ./custom in the cwd.")
 	parser.add_argument("--output-dir", "-o", dest="output_path", default=OUTPUT_PATH,
-						help=f"Optional path to the directory generated munki files should be written to. Defaults to {OUTPUT_PATH}")
+						help=f"Optional path to the directory generated Munki items should be written to. Defaults to ./{OUTPUT_PATH}")
 	parser.add_argument("--prefix", dest="prefix",
 						help=f"Optional prefix to add to the name of every generated munki item and it's file name.")
 	parser.add_argument("--suffix", dest="suffix",
@@ -594,10 +594,10 @@ def process_args():
 	parser.add_argument("--separate-fix", "-s", dest="separate_fix", action="store_true",
 						help="Write fix script in preinstall_script, rather than in installcheck_script.")
 	parser.add_argument("--no-munki-output", dest="no_echo", action="store_true",
-						help="Prevent munki items from using echo statements to log their checks and fixes.")
+						help="Prevent Munki items from using echo statements to log their checks and fixes.")
 	parser.add_argument("--mobileconfig-file", dest="mobileconfig_path",
-						help="Optional path to the file where munki items will write to if their fix can only be implemented by a configuration profile. Specifying a file path here will override a file given in the configuration yaml file.")
-	parser.add_argument("--markdown-path", dest="md_path", default=MD_PATH,
+						help="Optional path to the file where Munki items will write to if their fix can only be implemented by a configuration profile. Specifying a file path here will override a file given in the configuration yaml file.")
+	parser.add_argument("--markdown-file", dest="md_path", default=MD_PATH,
 						help=f"Optional file name to print markdown summary of how the rules were processed by this script. Defaults to {MD_PATH}")
 	args = parser.parse_args()
 	if args.mscp_path:
