@@ -1,12 +1,10 @@
 #!/usr/bin/env python3
 import datetime
-# import importlib.util
 import logging
 import argparse
 import os
 import pathlib
 import plistlib
-# import runpy
 import sys
 import yaml
 
@@ -82,7 +80,7 @@ def process_rule(rule, config, separate_fix, include_echo, mobileconfig_path, ou
 				note = note2
 		else:
 			note = note2
-	if (rule.check and rule.result_value != None and rule.fix):
+	if rule.check and (rule.result_value is not None) and rule.fix:
 		create_munki_item(rule, config, separate_fix, include_echo, mobileconfig_path, output_path)
 		script_summary["items_made"].append((rule.rule_id, note))
 	elif rule.mobileconfig_info:
@@ -298,8 +296,8 @@ def write_munki_item(name, output_path, item):
 				logging.error(f"Could not write to file {item_path} in munki directory.")
 				logging.error(e, exc_info=True)
 				sys.exit(1)
-	except PermissionError as e:
-		logging.error(f"No write access to {path}")
+	except PermissionError:
+		logging.error(f"No write access to {item_path}")
 		sys.exit(1)
 
 # # ----------------------------------------
@@ -315,7 +313,7 @@ def get_config(config_path, prefix, suffix, version):
 		else:
 			result = read_yaml(config_path)
 	elif not os.path.exists(CONFIG_PATH):
-		# file was not user provided and was not there -> warning: use defauls
+		# file was not user provided and was not there -> warning: use defaults
 		logging.warning("No configuration file is present. Will continue with default settings.")
 		result = DEFAULT_CONFIG
 	else:
@@ -348,7 +346,7 @@ def check_config(config):
 			logging.error(f'Unknown key(s) in config file: {str(set(keys).difference({"fields_from_rule", "static_fields", "metadata", "prefix", "suffix"}))[1 : -1]}. Please update config file.')
 			sys.exit(1)
 	else:
-		logging.error(f"Unexpected format of config file. Expected file in the format of dictionary, but indtead file is formatted as {type(config)}. Please update config file.")
+		logging.error(f"Unexpected format of config file. Expected file in the format of dictionary, but instead file is formatted as {type(config)}. Please update config file.")
 		sys.exit(1)
 	return True
 
@@ -599,7 +597,7 @@ def process_args():
 						help="Prevent munki items from using echo statements to log their checks and fixes.")
 	parser.add_argument("--mobileconfig-file", dest="mobileconfig_path",
 						help="Optional path to the file where munki items will write to if their fix can only be implemented by a configuration profile. Specifying a file path here will override a file given in the configuration yaml file.")
-	parser.add_argument("--markdown", dest="md_path", default=MD_PATH,
+	parser.add_argument("--markdown-path", dest="md_path", default=MD_PATH,
 						help=f"Optional file name to print markdown summary of how the rules were processed by this script. Defaults to {MD_PATH}")
 	args = parser.parse_args()
 	if args.mscp_path:
@@ -620,7 +618,7 @@ def main():
 	mobileconfig_path = update_mobileconfig_path(mobileconfig_path, config)
 	# prep summary
 	script_summary = {"items_made":[], "config_items_made":[], "items_skipped":[], "rules_no_fix":[]}
-	# import clases
+	# import classes
 	mscp_imports(mscp_path, custom_path)
 	# output dir
 	prep_munki_item_dir(output_path)
