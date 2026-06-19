@@ -583,7 +583,7 @@ def process_args():
 						help="Path to baseline yaml file.")
 	parser.add_argument("--config", "-c", dest="config_path",
 						help=f"Optional path to the configuration yaml file, which specifies values for the munki item. Defaults to {CONFIG_PATH}")
-	parser.add_argument("--custom", dest="custom_path",
+	parser.add_argument("--custom-dir", dest="custom_path",
 						help=f"Optional path to the custom directory. Defaults to /custom within the provided mSCP directory, if this directory is provided. Otherise defaults to ./custom in the cwd.")
 	parser.add_argument("--output-dir", "-o", dest="output_path", default=OUTPUT_PATH,
 						help=f"Optional path to the directory generated munki files should be written to. Defaults to {OUTPUT_PATH}")
@@ -593,7 +593,7 @@ def process_args():
 						help=f"Optional suffix to add to the name of every generated munki item and it's file name.")
 	parser.add_argument("--version", "-v", dest="version",
 						help=f"Optional version to be set in every munki item and appended to the name of every generated munki item. Specifying a version here will override a version given in the configuration yaml file.")
-	parser.add_argument("--separate", "-s", dest="separate_fix", action="store_true",
+	parser.add_argument("--separate-fix", "-s", dest="separate_fix", action="store_true",
 						help="Write fix script in preinstall_script, rather than in installcheck_script.")
 	parser.add_argument("--no-munki-output", dest="no_echo", action="store_true",
 						help="Prevent munki items from using echo statements to log their checks and fixes.")
