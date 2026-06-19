@@ -577,7 +577,7 @@ def process_args():
 		description="`munki-mscp-generator` is a utility that can create Munki items from your macOS Security Compliance baselines.",
 		usage="%(prog)s [args]"
 	)
-	parser.add_argument("--mscp_dir", "-m", dest="mscp_path",
+	parser.add_argument("--mscp-dir", "-m", dest="mscp_path",
 						help="Optional path to the mSCP directory https://github.com/usnistgov/macos_security. Will use rules, baselines and customs found in this dir if paths are not otherwise specified. If this arg is not provided, mscp MUST be pip installed with `pip install git+https://github.com/usnistgov/macos_security`")
 	parser.add_argument("--baseline-path", "-b", dest="baseline_path",
 						help="Path to baseline yaml file.")
@@ -585,7 +585,7 @@ def process_args():
 						help=f"Optional path to the configuration yaml file, which specifies values for the munki item. Defaults to {CONFIG_PATH}")
 	parser.add_argument("--custom", dest="custom_path",
 						help=f"Optional path to the custom directory. Defaults to /custom within the provided mSCP directory, if this directory is provided. Otherise defaults to ./custom in the cwd.")
-	parser.add_argument("--outputdir", "-o", dest="output_path", default=OUTPUT_PATH,
+	parser.add_argument("--output-dir", "-o", dest="output_path", default=OUTPUT_PATH,
 						help=f"Optional path to the directory generated munki files should be written to. Defaults to {OUTPUT_PATH}")
 	parser.add_argument("--prefix", dest="prefix",
 						help=f"Optional prefix to add to the name of every generated munki item and it's file name.")
@@ -603,11 +603,11 @@ def process_args():
 						help=f"Optional file name to print markdown summary of how the rules were processed by this script. Defaults to {MD_PATH}")
 	args = parser.parse_args()
 	if args.mscp_path:
-		check_path(args.mscp_path, "mSCP directory", "-m or -mscp_dir")
+		check_path(args.mscp_path, "mSCP directory", "-m or -mscp-dir")
 		args.custom_path = check_path_with_default(args.custom_path, os.path.join(args.mscp_path, "custom"), "custom directory", "--custom", False)
 	else:
 		args.custom_path = check_path_with_default(args.custom_path, "./custom", "custom directory", "--custom", False)
-	check_path(args.baseline_path, "baseline yaml file", "-b or -baseline_path")
+	check_path(args.baseline_path, "baseline yaml file", "-b or -baseline-path")
 	return args.mscp_path, args.baseline_path, args.config_path, args.custom_path, args.output_path, args.prefix, args.suffix, args.version, args.separate_fix, not args.no_echo, args.mobileconfig_path, args.md_path
 
 def main():
