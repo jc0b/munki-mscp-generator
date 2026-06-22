@@ -625,7 +625,7 @@ def main():
 
 	# process relevant rules
 	logging.info("Loading baseline...")
-	baseline = Baseline.from_yaml(pathlib.Path(baseline_path), custom=True)
+	baseline = Baseline.from_yaml(pathlib.Path(baseline_path))
 	logging.info("Successfully loaded baseline.")
 	print("\n")
 	for profile in baseline.profile:
