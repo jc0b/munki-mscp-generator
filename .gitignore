@@ -1,8 +1,9 @@
-
+mscp/
 example-munki-item.xml
 example-Makefile.txt
 munki-mscp-generation-summary.md
 munki/
+munki-2.0/
 .DS_Store
 version/
 rules/
