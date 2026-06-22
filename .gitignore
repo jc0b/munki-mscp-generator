@@ -8,3 +8,5 @@ munki-2.0/
 version/
 rules/
 baselines/
+/mscp
+/munki-2.0

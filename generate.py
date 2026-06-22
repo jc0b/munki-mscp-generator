@@ -1,9 +1,7 @@
 #!/usr/bin/env python3
-
-import datetime
 import datetime
 import logging
-import optparse
+import argparse
 import os
 import pathlib
 import plistlib
@@ -14,6 +12,7 @@ CONFIG_PATH = "config.yaml"
 MD_PATH = "munki-mscp-generation-summary.md"
 OUTPUT_PATH = "munki"
 
+BASH_INDICATOR = "[source,bash]"
 SHEBANG_BASH = "#!/bin/bash\n"
 SHEBANG_ZSH = "#!/bin/zsh\n"
 
@@ -33,278 +32,79 @@ DEFAULT_CONFIG = {
 	}
 }
 
-# ----------------------------------------
-#            Path Navigation
-# ----------------------------------------
-def get_all_input_paths(baseline_path, baseline_name, custom_path, rules_path, folder_path):
-	check_folder_path(baseline_path, custom_path, rules_path, folder_path)
-	baseline_path = get_baseline_path(baseline_path, baseline_name, folder_path)
-	custom_path = get_custom_path(custom_path, folder_path)
-	rules_path = get_rules_path(rules_path, folder_path)
-	return baseline_path, custom_path, rules_path
-
-def check_folder_path(baseline_path, custom_path, rules_path, folder_path):
-	if not (baseline_path and custom_path and rules_path) and folder_path:
-		# folder needed and given
-		if not os.path.exists(folder_path):
-			# folder does not exists
-			logging.error(f"Given directory {folder_path} does not exist.")
-			sys.exit(1)
-		elif not os.access(folder_path, os.R_OK):
-			# folder exists but no access
-			logging.error(f"No access to {folder_path}")
-			sys.exit(1)	
-
-def get_rules_path(rules_path, folder_path):
-	original_rules_path = rules_path
-	# if no rules path given check if we can make it
-	if not rules_path:
-		if folder_path:
-			rules_path = os.path.join(folder_path, "rules")
-		else:
-			rules_path = "rules"
-		if not os.path.exists(rules_path):
-			# no rules subdirectory found
-			logging.error(f"No rules directory found, thus no items can be created from rules.")
-			sys.exit(1)	
-	# if rules folder contains only one folder, go one level deeper
-	rules_path = nav_down(rules_path)
-	# if new folder contains a rules folder, nav to it
-	paths = os.listdir(rules_path)
-	if "rules" in paths:
-		rules_path = os.path.join(rules_path, "rules")
-	if original_rules_path != rules_path:
-		logging.info(f"Using directory {rules_path} as rules directory.")
-	return rules_path	
-
-def nav_down(path):
+# # ----------------------------------------
+# #           mSCP imports
+# # ----------------------------------------
+def mscp_imports(path, custom_dir):
+	global Baseline
+	# if path import from there
 	if path:
-		is_path_new = True
-		while(is_path_new):
-			is_path_new = False
-			if os.path.exists(path):
-				paths = [new_path for new_path in os.listdir(path) if not new_path.startswith(".")]
-				if len(paths) == 1 and os.path.isdir(os.path.join(path, paths[0])):
-					path = os.path.join(path, paths[0])
-					is_path_new = True
-	return path
-
-def get_custom_path(custom_path, folder_path):
-	original_path = custom_path
-	# if no baseline path given check if we can make it
-	if not custom_path:
-		if folder_path:
-			custom_path = os.path.join(folder_path, "custom")
-		else:
-			custom_path = "custom"
-		if not os.path.exists(custom_path):
-			# no custom subdirectory found
-			logging.warning(f"No custom directory found. Continuing without.")
-			return None
-	# if folder has rules subdirectory go there
-	if os.path.exists(os.path.join(custom_path, "rules")):
-		custom_path = os.path.join(custom_path, "rules")
-	if original_path != custom_path:
-		logging.info(f"Using directory {custom_path} as custom directory.")
-	return custom_path
-
-def get_baseline_path(baseline_path, baseline_name, folder_path):
-	original_path = baseline_path
-	# if no baseline path given check if we can make it
-	# can be in given folder, baseline folder, or current directory
-	if not baseline_path:
-		if folder_path:
-			baseline_path = os.path.join(folder_path, "baselines")
-		elif os.path.exists("baselines"):
-			baseline_path = "baselines"
-		elif not baseline_name:
-			logging.warning(f"No custom baseline file provided. Munki items will be generated for all rules provided.")
-			baseline_path = None
-		if baseline_path and (not os.path.exists(baseline_path)):
-			# no baselines subdirectory found
-			if baseline_name:
-				# specific name given: error file not found
-				logging.error(f"Expected custom baseline named {baseline_name} in {baseline_path} but no such directory {baseline_path} was found.")
-				sys.exit(1)
-			else:
-				# no specific path or name given, fall to default
-				if folder_path:
-					logging.warning(f"No path to a custom baseline was given. The directory {folder_path} was specified, but does not contain a 'baselines' subdirectory. Thus no custom baseline file could be found. Munki items will be generated for all rules provided.")
-				else:
-					logging.warning(f"No custom baseline file provided. Munki items will be generated for all rules provided.")
-				baseline_path = None
-		else:
-			# baselines subdirectory found
-			# if name is given
-			if baseline_name:
-				if not baseline_path:
-					baseline_path = ""
-				if not (baseline_name.endswith(".yaml" or baseline_name.endswith(".yml"))):
-					baseline_name_1 = baseline_name + ".yaml"
-					baseline_path_1 = os.path.join(baseline_path, baseline_name_1)
-					baseline_name_2 = baseline_name + ".yml"
-					baseline_path_2 = os.path.join(baseline_path, baseline_name_2)
-					if os.path.exists(baseline_path_1):
-						baseline_path = baseline_path_1
-					elif os.path.exists(baseline_path_2):
-						baseline_path = baseline_path_2
-					else:
-						if baseline_path == "":
-							baseline_path = "current directory"
-						logging.error(f"Expected custom baseline yaml file named {baseline_name} in {baseline_path} but no such file was found.")
-						sys.exit(1)
-				else:
-					baseline_path = os.path.join(baseline_path, baseline_name)
-			else:
-				if not baseline_path:
-					logging.warning(f"No path to a custom baseline file found in {baseline_path} so munki items will be generated for all rules provided.")
-					baseline_path = None
-				# have directory, if it contains only one file use that file
-				else:
-					file_names = [file_name for file_name in os.listdir(baseline_path) if (file_name.endswith(".yaml") or file_name.endswith(".yml"))]
-					if len(file_names) == 1:
-						baseline_path = os.path.join(baseline_path, file_names[0])
-					elif len(file_names) == 0:
-						logging.warning(f"No path to a custom baseline file found in {baseline_path} so munki items will be generated for all rules provided.")
-						baseline_path = None
-					else:
-						logging.error(f"Multiple files found in {baseline_path}. Please specify the name of your custom baseline.")
-						sys.exit(1)
-	elif not os.path.exists(baseline_path):
-		logging.error(f"Custom baseline file {baseline_path} is not present.")
-		sys.exit(1)
-	if original_path != baseline_path:
-		logging.info(f"Using directory {baseline_path} as baseline path.")
-	return baseline_path
-
-# ----------------------------------------
-#            Baseline
-# ----------------------------------------
-def get_baseline_profile(baseline, baseline_path) -> list:
-	if baseline and "profile" in baseline:
-		profile = baseline["profile"]
-		if type(profile) == list and len(profile) > 0:
-			return profile
-		else:
-			logging.warning(f"Provided baseline file {baseline_path} contains no rules, so there are no items to generate.")
-			sys.exit(0)
-	else:
-		logging.error(f"Provided baseline file {baseline_path} contains no profile.")
-		sys.exit(1)
-
-def check_baseline_defaults(baseline, config):
-	if ("odv_default" not in config) and ("parent_values" in baseline):
-		config["odv_default"] = baseline["parent_values"]
-
-# ----------------------------------------
-#              Rules
-# ----------------------------------------
-def find_rule(rule_name, rules_folder, looking_for_custom=False):
-	rules_path = pathlib.Path(rules_folder)
-	files = []
-	# add extension if missing
-	# find location of rule
-	if not (rule_name.endswith(".yaml") or rule_name.endswith(".yml")):
-			files += list(rules_path.rglob(rule_name + ".yaml"))
-			files += list(rules_path.rglob(rule_name + ".yml"))
-	else:
-		files += list(rules_path.rglob(rule_name))
-	# check that rule exists in exactly one location
-	if len(files) < 1:
-		if looking_for_custom:
-			return None
-		else:	
-			logging.error(f"Rule {rule_name} was not found in {rules_path}.")
+		try:
+			sys.path.append(os.path.abspath(path))
+			logging.info("Importing from mSCP directory...")
+			from src.mscp.common_utils.config import set_custom_dir 
+			from src.mscp.classes.baseline import Baseline
+			logging.info("Successfully finished importing from mSCP directory.")
+		except Exception as e:
+			logging.error(f"Unable to make necessary imports from {path}. This directory should correspond to https://github.com/usnistgov/macos_security.")
+			logging.error(e, exc_info=True)
 			sys.exit(1)
-	elif len(files) > 1:
-		s = "rule"
-		if looking_for_custom:
-			s = "custom for rule"
-		logging.error(f"More than one {s} {rule_name} found. Please make sure only one file exists per rule.")
-		logging.error(f"Files found: {files}.")
-		sys.exit(1)
 	else:
-		rules_path = files[0]
-	# read rule
-	return read_yaml(rules_path)
+		# else expect pip install
+		try:
+			logging.info("Importing from mSCP pip library...")
+			from mscp.common_utils.config import set_custom_dir 
+			from mscp.classes.baseline import Baseline
+			logging.info("Successfully finished importing from mSCP pip library.")
+		except Exception as e:
+			logging.error(f"Unable to import from mSCP. Please pip install this library with `pip install git+https://github.com/usnistgov/macos_security@dev_2.0` or provide the location of the mSCP dir with -m")
+			logging.error(e, exc_info=True)
+			sys.exit(1)
+	set_custom_dir(custom_dir)
 
-def process_rule(rule_name, rules_folder, output_path, config, odv_level_items, custom_path, separate_fix, include_echo, config_profile_list_file, script_summary):
-	rule = find_rule(rule_name, rules_folder)
-	rule_name = get_rule_name(rule_name, rule)
-	custom = get_custom(rule, rule_name, custom_path, odv_level_items, config)
-	if rule_has_fix(rule, rule_name, config_profile_list_file, custom, script_summary):
-		create_munki_item(rule, rule_name, output_path, config, odv_level_items, custom_path, separate_fix, include_echo, config_profile_list_file, custom)
+# # ----------------------------------------
+# #              Rules
+# # ----------------------------------------
 
-def get_all_rules(rules_folder):
-	rules_path = pathlib.Path(rules_folder)
-	result = list(rules_path.rglob("*.yaml"))
-	result += list(rules_path.rglob("*.yml"))
-	return result
-
-def process_all_rules(rules_folder, output_path, config, odv_level_items, custom_path, separate_fix, include_echo, config_profile_list_file, script_summary):
-	rule_paths = get_all_rules(rules_folder)
-	for rule_path in rule_paths:
-		rule = read_yaml(rule_path)
-		rule_name = get_rule_name(rule_path, rule)
-		custom = get_custom(rule, rule_name, custom_path, odv_level_items, config)
-		if rule_has_fix(rule, rule_name, config_profile_list_file, custom, script_summary):	
-			create_munki_item(rule, rule_name, output_path, config, odv_level_items, custom_path, separate_fix, include_echo, config_profile_list_file, custom)
-
-def rule_has_fix(rule, name, config_profile_list_file, custom, script_summary):
-	if "check" in rule and "result" in rule and "fix" in rule:
-		# there is fix -> check if fix can be in munki item
-		# check if fix in configuration profile
-		if config_profile_list_file:
-			if is_fix_by_config_profile(rule["fix"]):
-				if "mobileconfig_info" in rule:
-					# if mobileconfig_info given add this as info, otherwise info = mobileconfig
-					if rule["mobileconfig_info"]:
-						script_summary["config_items_made"].append((name, rule["mobileconfig_info"], custom))
-					else:
-						script_summary["config_items_made"].append((name, rule["mobileconfig"], custom))
-				else:
-					logging.error(f"Rule {name} has a fix implemented by a Configuration Profile, but is missing the mobileconfig_info key.")
-					sys.exit(1)
-				return True
-		# check if fix is bash script
-		fix = rule["fix"].rstrip("\n")
-		lines = fix.splitlines()
-		if "source" in lines[0]:
-			chunks = rule["fix"].split("----")
-			if len(chunks) > 2:
-				note = "----".join(chunks[2:]).lstrip(" \n").rstrip(" \n")
-				script_summary["items_made"].append((name, note, custom))
-			else:
-				script_summary["items_made"].append((name, None, None))
-			return True
+def process_rule(rule, config, separate_fix, include_echo, mobileconfig_path, output_path, script_summary):
+	note = None
+	if "note:" in rule.discussion.lower():
+		n = rule.discussion.lower().find("note:") 
+		note = rule.discussion[n:].strip()
+	if "warning:" in rule.discussion.lower():
+		n = rule.discussion.lower().find("warning:") 
+		note2 = rule.discussion[n:].strip()
+		logging.warning(f"Rule {rule.rule_id} comes with the following warning:\n\t\t\t{note2}\n\t\t\tDespite the warning a munki item has been created for {rule.rule_id}.\n\t\t\tIf you wish to remove this rule, please do so in the baseline.")
+		if note:
+			if len(note2) > len(note):
+				note = note2
 		else:
-			# Fix must be impolemented outside of a munki item. Item is skipped.
-			script_summary["items_skipped"].append((name, fix, custom))
-			return False
+			note = note2
+	if rule.check and (rule.result_value is not None) and rule.fix:
+		create_munki_item(rule, config, separate_fix, include_echo, mobileconfig_path, output_path)
+		script_summary["items_made"].append((rule.rule_id, note))
+	elif rule.mobileconfig_info:
+		if mobileconfig_path:
+			create_munki_item(rule, config, separate_fix, include_echo, mobileconfig_path, output_path)
+			script_summary["config_items_made"].append((rule.rule_id, rule.mobileconfig_info, note))
+		else:
+			script_summary["items_skipped"].append((rule.rule_id, rule.mobileconfig_info, note))
 	else:
-		script_summary["rules_no_fix"].append(name)
-		False
+		if not note:
+			note = ""
+		script_summary["rules_no_fix"].append((rule.rule_id, f"The fix mechanism is {rule.mechanism}. \n{note}"))
 
-def is_fix_by_config_profile(fix):
-	return fix.rstrip("\n").lstrip("\n") == "This is implemented by a Configuration Profile."
 
-def get_rule_name(rule_path, rule):
-	if "id" in rule:
-		return rule["id"]
-	else:
-		#get name from file name
-		return pathlib.Path(filename).stem
+# # ----------------------------------------
+# #              Munki Items
+# # ----------------------------------------
 
-# ----------------------------------------
-#              Munki Items
-# ----------------------------------------
-
-def create_munki_item(rule, name, output_path, config, odv_level_items, custom_path, separate_fix, include_echo, config_profile_list_file, custom):
+def create_munki_item(rule, config, separate_fix, include_echo, mobileconfig_path, output_path):
 	item = dict()
 	# name
-	munki_item_name = get_munki_item_name(name, config)
+	munki_item_name = get_munki_item_name(rule.rule_id, config)
 	item["name"] = munki_item_name
-	munki_item_name_file_name = munki_item_name
+	munki_item_file_name = munki_item_name
 	# metadata
 	if "metadata" in config:
 		metadata = config["metadata"]
@@ -314,75 +114,40 @@ def create_munki_item(rule, name, output_path, config, odv_level_items, custom_p
 		item["_metadata"] = metadata
 	# version
 	if "version" in config:
-		munki_item_name_file_name += f"{config['delimiter']}{config['version']}"
+		munki_item_file_name += f"{config['delimiter']}{config['version']}"
 		item["version"] = str(config["version"])
 	# non static keys
 	if "fields_from_rule" in config:
 		for key in config["fields_from_rule"]:
-			add_rule_info_to_item(item, rule, key, config["fields_from_rule"][key], custom)
+			item[key] = getattr(rule, config["fields_from_rule"][key])
 	# static keys
 	if "static_fields" in config:
 		for key in config["static_fields"]:
 			item[key] = config["static_fields"][key]
 	# check / fix
 	# fix is with configuration profile
-	if is_fix_by_config_profile(rule["fix"]):
-		if config_profile_list_file:
-			add_config_profile_for_install(item, name, config_profile_list_file, separate_fix, include_echo)
-			add_config_profile_for_uninstall(item, name, config_profile_list_file, include_echo)
+	if rule.mobileconfig_info and mobileconfig_path:
+		if mobileconfig_path:
+			add_write_to_mobileconfig_profile_file(item, rule.rule_id, mobileconfig_path, separate_fix, include_echo)
 		else:
-			logging.error("Trying to crate munki items for rules where fix must be implemented by a Configuration Profile but no config_profile_list_file is given. Something went wrong!")
+			logging.error("Trying to crate munki items for rules where fix must be implemented by a Configuration Profile but no mobileconfig_path is given. Something went wrong!")
 			sys.exit(1)
 	# fix is code
 	else:
-		prefix_code = ""
-		if "discussion" in rule:
-			prefix_code = get_code_from_discussion(rule["discussion"])
-		if separate_fix:
-			add_check_to_installcheck(item, rule, name, custom, config["check_prefix"] + "\n" + prefix_code, include_echo)
-			add_fix_to_preinstall(item, rule, name, custom, prefix_code, include_echo)
-		else:
-			add_check_and_fix_to_installcheck(item, rule, name, custom, config["check_prefix"] + "\n" + prefix_code, include_echo)
+		add_check_fix_scripts(item, rule, separate_fix, include_echo, config["check_prefix"])
 	# write
-	write_munki_item(munki_item_name_file_name + ".plist", output_path, item)
+	write_munki_item(f"{munki_item_file_name}.plist", output_path, item)
 
-def get_custom(rule, name, custom_path, odv_level_items, config):
-	custom = None
-	if "odv" in rule:
-		# check if custom
-		if custom_path:
-			custom = find_rule(name, custom_path, looking_for_custom=True)
-		else:
-			custom = None
-		if custom:
-			if "odv" in custom and "custom" in custom["odv"]:
-				custom = str(custom["odv"]["custom"])
-			else:
-				logging.error(f"Custom for {name} does not contain expected odv and custom keys.")
-				sys.exit(1)
-		else:
-			# check if level
-			if name in odv_level_items:
-				level = odv_level_items[name]
-			elif "odv_default" in config:
-				# use default  
-				level = config["odv_default"]
-			else:
-				logging.error(f"Rule {name} requires a custom odv, but none was provided and a default was not given in the config file.")
-				sys.exit(1)
-			if level in rule["odv"]:
-				custom = str(rule["odv"][level])
-			else:
-				logging.error(f"Should use {level} for odv for rule {name}, however no such odv value is given in this rule.")
-				sys.exit(1)
-	return custom
-
-def add_rule_info_to_item(item, rule, item_field, rule_field, custom):
-	if rule_field in rule:
-		value = rule[rule_field]
-		if custom and type(value) == str:
-			value = value.replace("$ODV", custom)
-		item[item_field] = value
+def add_check_fix_scripts(item, rule, separate_fix, include_echo, check_prefix):
+	prefix_code = ""
+	if BASH_INDICATOR in rule.discussion:
+		prefix_code = get_code_from_discussion(rule.discussion)
+	check_prefix = (check_prefix + "\n" + prefix_code).rstrip("\n")
+	if separate_fix:
+		add_check_to_installcheck(item, rule, check_prefix, include_echo)
+		add_fix_to_preinstall(item, rule, prefix_code, include_echo)
+	else:
+		add_check_and_fix_to_installcheck(item, rule, check_prefix, include_echo)
 
 def create_if_else_script(shebang, prefix, comp, if_script, else_script, ends_with_exit1 = True):
 	s = shebang 
@@ -398,109 +163,63 @@ def create_if_else_script(shebang, prefix, comp, if_script, else_script, ends_wi
 		s += "\n\nexit 1"
 	return s
 
-def add_check_and_fix_to_installcheck(item, rule, rule_name, custom, prefix_code, include_echo):
+def create_check_strings(rule, prefix_code, include_echo):
 	# store check variable
-	prefix_code = prefix_code.rstrip("\n")
-	prefix_code += "\n\n" + create_bash_var_str(rule['check'])
+	prefix_code += f"\n\nresult_value=$({rule.check})\n"
 	# compare to expected result
-	comparison = create_bash_compare_str(rule["result"], rule_name)
-	# fix
-	fix = create_bash_fix_str(rule["fix"], rule_name, item, include_echo)
+	comparison = f"[[ $result_value != \"{rule.result_value}\" ]]"
 	# suffix
 	else_script = None
 	if include_echo:
-		else_script = 'echo "No fix needed"'
+		else_script = "echo \"No fix needed\""
+	return prefix_code, comparison, else_script
+	
+def add_check_and_fix_to_installcheck(item, rule, prefix_code, include_echo):
+	# store check variable, compare to expected result and get optional echo if no fix needed
+	prefix_code, comparison, else_script = create_check_strings(rule, prefix_code, include_echo)
+	# fix
+	fix = create_bash_fix_str(rule, include_echo)
 	# write script
-	s = create_if_else_script(SHEBANG_BASH, prefix_code, comparison, fix, else_script)
-	if custom:
-		s = s.replace("$ODV", custom)
-	item["installcheck_script"] = s
+	item["installcheck_script"] = create_if_else_script(SHEBANG_BASH, prefix_code, comparison, fix, else_script)
 
-def add_check_to_installcheck(item, rule, rule_name, custom, prefix_code, include_echo):
-	# store check variable
-	prefix_code = prefix_code.rstrip("\n")
-	prefix_code += "\n\n" + create_bash_var_str(rule['check'])
-	# compare to expected result
-	comparison = create_bash_compare_str(rule["result"], rule_name)
+def add_check_to_installcheck(item, rule, prefix_code, include_echo):
+	# store check variable and compare to expected result
+	prefix_code, comparison, else_script = create_check_strings(rule, prefix_code, include_echo)
 	# fix
 	if_script = "exit 0"
-	# suffix
-	else_script = None
-	if include_echo:
-		else_script = 'echo "No fix needed"'
 	# write script
-	s = create_if_else_script(SHEBANG_BASH, prefix_code, comparison, if_script, else_script)
-	if custom:
-		s = s.replace("$ODV", custom)
-	item["installcheck_script"] = s
+	item["installcheck_script"] = create_if_else_script(SHEBANG_BASH, prefix_code, comparison, if_script, else_script)
 
-def add_fix_to_preinstall(item, rule, rule_name, custom, prefix_code, include_echo):
+def add_fix_to_preinstall(item, rule, prefix_code, include_echo):
 	# prefix
 	s = SHEBANG_BASH 
 	# add prefix code
 	s += prefix_code + "\n"
 	# fix
-	s += create_bash_fix_str(rule["fix"], rule_name, item, include_echo)
-	if custom:
-		s = s.replace("$ODV", custom)
+	s += create_bash_fix_str(rule, include_echo)
 	item["preinstall_script"] = s
 
-def create_bash_var_str(check):
-	check = check.lstrip("\n")
-	check = check.rstrip("\n")
-	return f"result_value=$({check})\n"
-
-def create_bash_compare_str(result_dict, rule_name):
-	keys = list(result_dict.keys())
-	if len(keys) != 1:
-		logging.error(f"Result for rule {rule_name} not formatted as expected, so cannot be processed by this script.")
-		sys.exit(1)
-	key = keys[0]
-	return f'[[ $result_value != "{result_dict[key]}" ]]'
-
-def create_bash_fix_str(fix, rule_name, item, include_echo):
+def create_bash_fix_str(rule, include_echo):
 	result = "" 
 	if include_echo:
 		result += 'echo "Applying fix"\n'
-	fix = fix.rstrip(" \n")
-	chunks = fix.split("----")
-	# check source
-	if chunks[0].lstrip(" \n").rstrip(" \n") == "[source,bash]":
-		fix = chunks[1]
-		if fix.startswith("\n"):
-			fix = fix[1:]
-		# add code to string
-		for line in fix.splitlines():
-			result += f"{line}\n"
-	else:
-		logging.error(f"Fix for rule {rule_name} not formatted as expected, so cannot be processed by this script.")
-		logging.error("Fix:")
-		logging.error(fix)
-		sys.exit(1)
-	# check if there are notes
-	if len(chunks) > 2:
-		note = "----".join(chunks[2:]).lstrip(" \n").rstrip(" \n")
-		if note.startswith("NOTE"):
-			note = note[len("NOTE"):]
-		note = note.lstrip(" :-")
-		# add note to item
-		if "notes" in item:
-			item["notes"] = item["notes"] + "\n\n" + note
-		elif note and note != "":
-			item["notes"] = note
-		# warn
-		# logging.info(f"Note for item {rule_name}\n\t{note}")
+	result += rule.fix
 	return result
 
-def add_config_profile_for_install(item, name, file, separate_fix, echo):
-	prefix = f'PLIST_PATH="{file}"\n\n'
+def add_write_to_mobileconfig_profile_file(item, name, path, separate_fix, include_echo):
+	add_config_profile_for_install(item, name, path, separate_fix, include_echo)
+	add_config_profile_for_uninstall(item, name, path, include_echo)
+
+
+def add_config_profile_for_install(item, name, path, separate_fix, include_echo):
+	prefix = f'PLIST_PATH="{path}"\n\n'
 	prefix2 = f"/usr/libexec/PlistBuddy -c 'Print :RequestedRules' $PLIST_PATH | /usr/bin/grep -qE '^\\s+{name}$'\n"
 	comp = "[[ ! $? ]]"
 	fix = ""
 	else_script = None
-	if echo:
-			fix += 'echo "Adding to plist file"\n'
-			else_script = 'echo "Already in plist file"\n'
+	if include_echo:
+			fix += "echo \"Adding to plist file\"\n"
+			else_script = "echo \"Already in plist file\"\n"
 	fix += "/usr/libexec/PlistBuddy -c 'Add :RequestedRules array' $PLIST_PATH\n"
 	fix += f"/usr/libexec/PlistBuddy -c 'Add :RequestedRules: string {name}' $PLIST_PATH\n"
 	if separate_fix:
@@ -509,7 +228,7 @@ def add_config_profile_for_install(item, name, file, separate_fix, echo):
 	else:
 		item["installcheck_script"] = create_if_else_script(SHEBANG_ZSH, prefix + prefix2, comp, fix, else_script)
 
-def add_config_profile_for_uninstall(item, name, file, echo):
+def add_config_profile_for_uninstall(item, name, path, include_echo):
 	if "autoremove" not in item:
 		item["autoremove"] = True
 	if "unattended_uninstall" not in item:
@@ -518,18 +237,18 @@ def add_config_profile_for_uninstall(item, name, file, echo):
 		item["uninstall_method"] = "uninstall_script"
 
 	# uninstall
-	prefix = f'PLIST_PATH="{file}"\n\n'
+	prefix = f'PLIST_PATH="{path}"\n\n'
 	# get number of times item in rules
 	prefix2 = f'requested_rule=$(/usr/libexec/PlistBuddy -c "Print :RequestedRules" $PLIST_PATH | /usr/bin/grep -n -E "^\\s+{name}$" | /usr/bin/awk -F ":" \'{"{print $1}"}\')\n'
 	# if 1 then remove it
 	comp = '[ ! -z "$requested_rule" ]'
 	# remove it
 	remove = '# Item to delete is the number minus two\nitemToDelete=$(($requested_rule-2))\n/usr/libexec/PlistBuddy -c "Delete :RequestedRules:$itemToDelete" $PLIST_PATH\n'
-	if echo:
+	if include_echo:
 		remove += 'echo "Removed from plist file"\n'
 	# else do nothing
 	else_script = None
-	if echo:
+	if include_echo:
 		else_script = 'echo "Item already removed from plist file - nothing to do"\n'
 	item["uninstall_script"] = create_if_else_script(SHEBANG_ZSH, prefix + prefix2, comp, remove, else_script, False)
 
@@ -537,24 +256,8 @@ def add_config_profile_for_uninstall(item, name, file, echo):
 	prefix3 = f'/usr/libexec/PlistBuddy -c \'Print :RequestedRules\' $PLIST_PATH | grep -qE "^\\s+{name}$"\n'
 	item["uninstallcheck_script"] = create_if_else_script(SHEBANG_ZSH, prefix + prefix3,  "[[ $? ]]", "exit 0", None)
 
-def write_munki_item(name, output_path, item):
-	item_path = os.path.join(output_path, name)
-	# open file
-	with open(item_path, "wb+") as fp:
-		try:
-			# make sure we are at start of file
-			fp.seek(0)
-			# write to file
-			plistlib.dump(item, fp, fmt=plistlib.FMT_XML, sort_keys=False)
-			# remove any excess of old file
-			fp.truncate()
-		except Exception as e:
-			logging.error(f"Could not write to file {item_path} in munki directory.")
-			logging.error(e, exc_info=True)
-			sys.exit(1)
-
 def get_munki_item_name(name, config):
-	name = name.replace('_', config["delimiter"])
+	name = name.replace("_", config["delimiter"])
 	if "prefix" in config:
 		name = config["prefix"] + name
 	if "suffix" in config:
@@ -572,14 +275,34 @@ def get_code_from_discussion(discussion):
 	chunks = discussion.split("----")
 	if len(chunks) > 1:
 		for i, s in enumerate(chunks):
-			if s.endswith("[source,bash]\n") and i < len(chunks)-1:
+			if (s.endswith(f"{BASH_INDICATOR}\n") or s.endswith(f"{BASH_INDICATOR}")) and i < len(chunks)-1:
 				result += chunks[i+1].lstrip(" \n").rstrip(" \n")
 				result += "\n"
 	return result
 
-# ----------------------------------------
-#                Config 
-# ----------------------------------------
+def write_munki_item(name, output_path, item):
+	item_path = os.path.join(output_path, name)
+	# open file
+	try:
+		with open(item_path, "wb") as file:
+			try:
+				# make sure we are at start of file
+				file.seek(0)
+				# write to file
+				plistlib.dump(item, file, fmt=plistlib.FMT_XML, sort_keys=False)
+				# remove any excess of old file
+				file.truncate()
+			except Exception as e:
+				logging.error(f"Could not write to file {item_path} in munki directory.")
+				logging.error(e, exc_info=True)
+				sys.exit(1)
+	except PermissionError:
+		logging.error(f"No write access to {item_path}")
+		sys.exit(1)
+
+# # ----------------------------------------
+# #                Config 
+# # ----------------------------------------
 def get_config(config_path, prefix, suffix, version):
 	if config_path:
 		# file specified 
@@ -590,7 +313,7 @@ def get_config(config_path, prefix, suffix, version):
 		else:
 			result = read_yaml(config_path)
 	elif not os.path.exists(CONFIG_PATH):
-		# file was not user provided and was not there -> warning: use defauls
+		# file was not user provided and was not there -> warning: use defaults
 		logging.warning("No configuration file is present. Will continue with default settings.")
 		result = DEFAULT_CONFIG
 	else:
@@ -604,41 +327,28 @@ def get_config(config_path, prefix, suffix, version):
 	return result
 
 def check_config(config):
-	if type(config) == dict:
+	if isinstance(config, dict):
 		keys = config.keys()
-		if set(keys).issubset({"fields_from_rule", "static_fields", "metadata", "odv_default", "odv_level", "prefix", "suffix", "version", "delimiter", "config_profile_list_file", "check_prefix"}):
+		if set(keys).issubset({"fields_from_rule", "static_fields", "metadata", "prefix", "suffix", "version", "delimiter", "mobileconfig_file", "check_prefix"}):
 			for key in keys:
-				if key in ["odv_default", "prefix", "suffix", "delimiter", "config_profile_list_file", "check_prefix"]:
-					if type(config[key]) != str:
+				if key in ["prefix", "suffix", "delimiter", "mobileconfig_file", "check_prefix"]:
+					if not isinstance(config[key], str):
 						logging.error(f"Unexpected format of config file. {key} is expected to be type string but is type {type(config[key])}. Please update config file.")
 						sys.exit(1)
 				elif key == "version":
-					if type(config[key]) != str and type(config[key]) != int and type(config[key]) != float:
+					if (not isinstance(config[key], str)) and (not isinstance(config[key], int)) and (not isinstance(config[key], float)):
 						logging.error(f"Unexpected format of config file. {key} is expected to be type string, int or float, but is type {type(config[key])}. Please update config file.")
 						sys.exit(1)
-				elif not type(config[key]) == dict:
+				elif not isinstance(config[key], dict):
 					logging.error(f"Unexpected format of config file. {key} is expected to be type dictionary but is type {type(config[key])}. Please update config file.")
 					sys.exit(1)
-				if key == "odv_level":
-					for key in config["odv_level"]:
-						if type(config["odv_level"][key]) != list:
-							logging.error(f"Unexpected format of config file. {key} is expected to be type list but is type {type(config['odv_level'][key])}. Please update config file.")
-							sys.exit(1)
 		else:
-			logging.error(f'Unknown key(s) in config file: {str(set(keys).difference({"fields_from_rule", "static_fields", "metadata", "odv_default", "odv_level", "prefix", "suffix"}))[1 : -1]}. Please update config file.')
+			logging.error(f'Unknown key(s) in config file: {str(set(keys).difference({"fields_from_rule", "static_fields", "metadata", "prefix", "suffix"}))[1 : -1]}. Please update config file.')
 			sys.exit(1)
 	else:
-		logging.error(f"Unexpected format of config file. Expected file in the format of dictionary, but indtead file is formatted as {type(config)}. Please update config file.")
+		logging.error(f"Unexpected format of config file. Expected file in the format of dictionary, but instead file is formatted as {type(config)}. Please update config file.")
 		sys.exit(1)
 	return True
-
-def get_all_items_odv_level(config):
-	result = dict()
-	if "odv_level" in config:
-		for key in config["odv_level"]:
-			for rule in config["odv_level"][key]:
-				result[rule] = key
-	return result
 
 def format_prefix_suffix(config, prefix, suffix, version):
 	if prefix:
@@ -670,105 +380,150 @@ def add_default_config_values(config):
 		config["static_fields"]["unattended_install"] = True
 		logging.warning("unattended_install not specified for munki items. Default (True) will be used.")
 
-def update_config_profile_list_file_from_config(config_profile_list_file, config):
-	if config_profile_list_file:
-		return config_profile_list_file
-	if "config_profile_list_file" not in config:
-		return config_profile_list_file
-	return config["config_profile_list_file" ]
+def update_mobileconfig_path(path, config):
+	if path:
+		return path
+	if "mobileconfig_file" not in config:
+		return None
+	return config["mobileconfig_file"]
 
-# ----------------------------------------
-#                Markdown
-# ----------------------------------------
-def write_md_file(md_file, system_settings):
-	md = md_description(system_settings)
-	try:
-		f = open(md_file, "w")
-		f.write(md)
-		f.close()
-		logging.info("Markdown file successfully updated.")
-	except Exception as e:
-		logging.error(f"Unable to write to {md_file}")
-		logging.error(e, exc_info=True)
-		sys.exit(1)
+# # ----------------------------------------
+# #                Markdown
+# # ----------------------------------------
+def write_md_file(md_file, script_summary):
+	md = md_description(script_summary)
+	write_file(md_file, md)
+	logging.info("Markdown file successfully updated.")
 
-def md_description(system_settings):
+def md_add_note(s, note):
+	if note:
+		for line in note.splitlines():
+			if line.startswith("*"):
+				s += f"        * {line[1:]}\n"
+
+			elif line.strip() != "":
+				s += f"    * {line}\n"
+	return s
+
+def md_add_mobileconfig_descr(s, info):
+	for mobileconfigpayload in info:
+		s += f"    * In preference domain {mobileconfigpayload.payload_type}:\n"
+		for d in mobileconfigpayload.payload_content:
+			for key in d:
+				s += f"        * `{key}` must be set to `{d[key]}`\n"
+	return s
+
+
+def md_description(script_summary):
 	s = "# Summary of munki items generated by munki-mscp-generator\n\n"
 
 	s += '## Generated Items\n\n'
 
-	if len(system_settings["items_made"]) > 0:
+	if len(script_summary["items_made"]) > 0:
 		s += "### Generated munki items for the following rules where fixes are implemented with a script:\n"
-		for name, note, custom in system_settings["items_made"]:
+		for name, note in script_summary["items_made"]:
 			s += f"* {name}\n"
-			if note:
-				if custom:
-					note = note.replace("$ODV", custom)
-				note = note.replace("*", "\\*")
-				s += "\n".join([f"    * {line}" for line in note.splitlines()])
-				s += "\n"
+			s = md_add_note(s, note)
 		s += "\n\n"
 
-	if len(system_settings["config_items_made"]) > 0:
+	if len(script_summary["config_items_made"]) > 0:
 		s += "### Generated munki items for the following rules where fixes must be implemented by a Configuration Profile:\n"
-		for name, info, custom in system_settings["config_items_made"]:
+		for name, info, note in script_summary["config_items_made"]:
 			s += f"* {name}\n"
-			if type(info) == dict:
-				for key in info:
-					keys = key
-					if not custom:
-						custom = "$ODV"
-					s += f"    * In preference domain {keys}:\n".replace("$ODV", custom)
-					d = info[key]
-					if d:
-						for key in d:
-							s += f"        * `{key}` must be set to `{d[key]}`\n".replace("$ODV", custom)
-			else:
-				s += f"    * `mobileconfig` = {info}, no `mobileconfig_info` given\n"
+			s = md_add_note(s, note)
+			s = md_add_mobileconfig_descr(s, info)
+		s += "\n\n"
 
-	if len(system_settings["items_made"]) + len(system_settings["items_skipped"]) < 1:
+	if len(script_summary["items_made"]) + len(script_summary["items_skipped"]) < 1:
 		s += "No munki items generated.\n\n"
 
-	s += '## Skipped Items\n\n'
-	if len(system_settings["items_skipped"]) > 0:
-		s += "### The following rules have fixes that must be addressed outside of a munki item:\n"
-		for name, fix, custom in system_settings["items_skipped"]:
-			s += f"* {name} with the fix:\n"
-			if custom:
-				fix = fix.replace("$ODV", custom)
-			fix = fix.replace("*", "\*")
-			s += "".join([f"    * {line}\n" if line not in ["", " "] else "" for line in fix.splitlines()])
-		s += "\n\n"
+	if len(script_summary["items_skipped"]) + len(script_summary["rules_no_fix"]) > 0:
+		s += '## Skipped Items\n\n'
 
-	if len(system_settings["rules_no_fix"]) > 0:
-		s += "### The following rules had no defined fix, so were skipped:\n* "
-		s += "\n* ".join(system_settings["rules_no_fix"])
-		s += "\n\n"
+		if len(script_summary["items_skipped"]) > 0:
+			s += "### The following rules were skipped as they have fixes that must be implemented by a Configuration Profile:\n"
+			for name, info, note in script_summary["items_skipped"]:
+				s += f"* {name}\n"
+				s = md_add_note(s, note)
+				s = md_add_mobileconfig_descr(s, info)
+			s += "\n\n"
 
-	s = s.replace("&", "\&")
-	s = s.replace("[", "\[")
-	s = s.replace("<", "\<")
+		if len(script_summary["rules_no_fix"]) > 0:
+			s += "### The following rules had no defined fix, so were skipped:\n* "
+			for name, note in script_summary["rules_no_fix"]:
+				s += f"* {name}\n"
+				s = md_add_note(s, note)
+			s += "\n\n"
+
+	s = s.replace("&", "\\&")
+	s = s.replace("[", "\\[")
+	s = s.replace("<", "\\<")
 	s = s.replace("]\n    * `\n    *", "\\<")
-	s = s.replace("----", "\----")
+	s = s.replace("----", "\\----")
 	return s
 
+# # ----------------------------------------
+# #           Helper functions
+# # ----------------------------------------
+def read_yaml(path) -> dict:	
+	try:
+		with open(path, "rb") as file_yaml:
+			try:
+				result = yaml.safe_load(file_yaml)
+				return result
+			except yaml.YAMLError as e:
+				logging.error(f"Unable to load {path}")
+				logging.error(e, exc_info=True)
+				sys.exit(1)
+	except PermissionError as e:
+		logging.error(f"No access to {path}")
+		logging.error(e, exc_info=True)
+		sys.exit(1)
 
-# ----------------------------------------
-#           Helper functions
-# ----------------------------------------
-
-def read_yaml(file_path) -> dict:
-	if not os.access(file_path, os.R_OK):
-		logging.error(f"No access to {file_path}")
+def write_yaml(path, d):
+	try:
+		with open(path, "w") as file:
+			try:
+				yaml.dump(d, file, default_flow_style=False, explicit_start=True)
+			except Exception as e:
+				logging.error(f"Unable to write to {path}")
+				logging.error(e, exc_info=True)
+				sys.exit(1) 
+	except PermissionError as e:
+		logging.error(f"No write access to {path}")
+		logging.error(e, exc_info=True)
 		sys.exit(1)	
-	with open(file_path, "r") as file_yaml:
-		try:
-			result = yaml.safe_load(file_yaml)
-			return result
-		except yaml.YAMLError as e:
-			logging.error(f"Unable to load {file_path}")
-			logging.error(e, exc_info=True)
-			sys.exit(1)
+
+def read_file(path):
+	try:
+		with open(path, 'r') as file:
+			try:
+				result = file.read()
+				return result
+			except Exception as e:
+				logging.error(f"Unable to read {path}")
+				logging.error(e, exc_info=True)
+				sys.exit(1)
+	except PermissionError as e:
+		logging.error(f"No access to {path}")
+		logging.error(e, exc_info=True)
+		sys.exit(1)	
+
+def write_file(path, s):
+	try:	
+		with open(path, "w") as file:
+			try:
+				file.seek(0)
+				file.write(s)
+				file.truncate()
+			except Exception as e:
+				logging.error(f"Unable to write to {path}")
+				logging.error(e, exc_info=True)
+				sys.exit(1) 
+	except PermissionError as e:
+		logging.error(f"No write access to {path}")
+		logging.error(e, exc_info=True)
+		sys.exit(1)	
 
 def setup_logging():
 	logging.basicConfig(
@@ -777,74 +532,111 @@ def setup_logging():
 		datefmt='%d/%m/%Y %H:%M:%S',
 		stream=sys.stdout)
 
-# ----------------------------------------
-#                 Main
-# ----------------------------------------
+def check_path(path, s, flag):
+	if not path:
+		logging.error(f"No path to the {s} given. Please provide this with {flag}.")
+		sys.exit(1)
+	if not os.path.exists(path):
+		logging.error(f"Provided path to the {s} does not exist. Please provide the correct path with {flag}.")
+		logging.error(f"Path provided: {path}")
+		sys.exit(1)
+	return path
 
-def process_options():
-	parser = optparse.OptionParser()
-	parser.set_usage('Usage: %prog [options]')
-	parser.add_option('--baseline-path', '-b', dest='baseline_path',
-						help='Optional path to custom baseline yaml file.')
-	parser.add_option('--baseline-name', '-n', dest='baseline_name',
-						help='Optional name of baseline yaml file.')
-	parser.add_option('--custom', '-c', dest='custom',
-						help='Optional path to custom folder.')
-	parser.add_option('--rules', '-r', dest='rules',
-						help='Optional path to rules folder.')
-	parser.add_option('--folder', '-f', dest='folder',
-						help='Optional path to a folder optionally containing a baselines, custom and rules folder. These folders will be used if paths are not directly specified.')
-	parser.add_option('--config', '-y', dest='config_file',
-						help=f'Optional path to the configuration yaml file, which specifies values for the munki item. Defaults to {CONFIG_PATH}')
-	parser.add_option('--munki', '-m', dest='output_path', default=OUTPUT_PATH,
-						help=f'Optional path to the directory generated munki files should be written to. Defaults to {OUTPUT_PATH}')
-	parser.add_option('--prefix', dest='prefix',
-						help=f'Optional prefix to add to the name of every generated munki item and it\'s file name.')
-	parser.add_option('--suffix', dest='suffix',
-						help=f'Optional suffix to add to the name of every generated munki item and it\'s file name..')
-	parser.add_option('--version', '-v', dest='version',
-						help=f'Optional version to be set in every munki item and appended to the name of every generated munki item. Specifying a version here will override a version given in the configuration yaml file.')
-	parser.add_option('--separate', '-s', dest='separate_fix', action='store_true',
-						help='Write fix script in preinstall_script, rather than in installcheck_script.')
-	parser.add_option('--no-munki-output', dest='no_echo', action='store_true',
-						help='Write fix script in preinstall_script, rather than in installcheck_script.')
-	parser.add_option('--config-profile-list-file', dest='config_profile_list_file',
-						help='Optional path to the file where munki items will write to if their fix can only be implemented by a configuration profile. Specifying a file path here will override a file given in the configuration yaml file.')
-	parser.add_option('--markdown', dest='markdown_path', default=MD_PATH,
-						help=f'Optional file name to print markdown summary of how the rules were processed by this script. Defaults to {MD_PATH}')
-	options, _ = parser.parse_args()
-	return options.baseline_path, options.baseline_name, options.custom, options.rules, options.folder, options.config_file, options.output_path, options.prefix, options.suffix, options.version, options.separate_fix, not options.no_echo, options.config_profile_list_file, options.markdown_path
+def check_path_with_default(path, default, s, flag, required):
+	# not using default
+	if path:
+		if not os.path.exists(path):
+			logging.error(f"Provided path to the {s} does not exist. Please provide the correct path with {flag}.")
+			logging.error(f"Path provided: {path}")
+			sys.exit(1)
+		return path
+	# using default
+	else:
+		# default path exists
+		if os.path.exists(default):
+			logging.info(f"No path to the {s} given. Default path {default} will be used.")
+			return default
+		# default path does not exist
+		else:
+			# required default path does not exist -> error
+			if required:
+				logging.error(f"No path to the {s} given. Default path {default} does not exist. Please provide the correct path with {flag}.")
+				sys.exit(1)
+			# optional default path does not exist -> warning
+			else:
+				logging.warning(f"No path to the {s} given. Default path {default} does not exist. Continuing without {s}. If you would like to use {s} please provide the correct path with {flag}.")
+				return default
 
+# # ----------------------------------------
+# #                 Main
+# # ----------------------------------------
+def process_args():
+	parser = argparse.ArgumentParser(
+		description="`munki-mscp-generator` is a utility that can create Munki items from your macOS Security Compliance baselines.",
+		usage="%(prog)s [args]"
+	)
+	parser.add_argument("--baseline-file", "-b", dest="baseline_path",
+						help="Path to baseline yaml file.")
+	parser.add_argument("--mscp-dir", "-m", dest="mscp_path",
+						help="Optional path to the mSCP directory https://github.com/usnistgov/macos_security. If this arg is not provided, mSCP MUST be pip installed with `pip install git+https://github.com/usnistgov/macos_security`")
+	parser.add_argument("--config-file", "-c", dest="config_path",
+						help=f"Optional path to the configuration yaml file, which specifies values for the munki item. Defaults to {CONFIG_PATH}")
+	parser.add_argument("--custom-dir", dest="custom_path",
+						help=f"Optional path to the custom directory. Defaults to /custom within the provided mSCP directory, if this directory is provided. Otherise defaults to ./custom in the cwd.")
+	parser.add_argument("--output-dir", "-o", dest="output_path", default=OUTPUT_PATH,
+						help=f"Optional path to the directory generated Munki items should be written to. Defaults to ./{OUTPUT_PATH}")
+	parser.add_argument("--prefix", dest="prefix",
+						help=f"Optional prefix to add to the name of every generated munki item and it's file name.")
+	parser.add_argument("--suffix", dest="suffix",
+						help=f"Optional suffix to add to the name of every generated munki item and it's file name.")
+	parser.add_argument("--version", "-v", dest="version",
+						help=f"Optional version to be set in every munki item and appended to the name of every generated munki item. Specifying a version here will override a version given in the configuration yaml file.")
+	parser.add_argument("--separate-fix", "-s", dest="separate_fix", action="store_true",
+						help="Write fix script in preinstall_script, rather than in installcheck_script.")
+	parser.add_argument("--no-munki-output", dest="no_echo", action="store_true",
+						help="Prevent Munki items from using echo statements to log their checks and fixes.")
+	parser.add_argument("--mobileconfig-file", dest="mobileconfig_path",
+						help="Optional path to the file where Munki items will write to if their fix can only be implemented by a configuration profile. Specifying a file path here will override a file given in the configuration yaml file.")
+	parser.add_argument("--markdown-file", dest="md_path", default=MD_PATH,
+						help=f"Optional file name to print markdown summary of how the rules were processed by this script. Defaults to {MD_PATH}")
+	args = parser.parse_args()
+	if args.mscp_path:
+		check_path(args.mscp_path, "mSCP directory", "-m or -mscp-dir")
+		args.custom_path = check_path_with_default(args.custom_path, os.path.join(args.mscp_path, "custom"), "custom directory", "--custom", False)
+	else:
+		args.custom_path = check_path_with_default(args.custom_path, "./custom", "custom directory", "--custom", False)
+	check_path(args.baseline_path, "baseline yaml file", "-b or -baseline-path")
+	return args.mscp_path, args.baseline_path, args.config_path, args.custom_path, args.output_path, args.prefix, args.suffix, args.version, args.separate_fix, not args.no_echo, args.mobileconfig_path, args.md_path
 
 def main():
 	setup_logging()
-	baseline_path, baseline_name, custom_path, rules_path, folder_path, config_path, output_path, prefix, suffix, version, separate_fix, include_echo, config_profile_list_file, md_path = process_options()
-	baseline_path, custom_path, rules_path = get_all_input_paths(baseline_path, baseline_name, custom_path, rules_path, folder_path)
 
-	script_summary = {"items_made":[], "config_items_made":[], "items_skipped":[], "rules_no_fix":[]}
-
+	mscp_path, baseline_path, config_path, custom_path, output_path, prefix, suffix, version, separate_fix, include_echo, mobileconfig_path, md_path = process_args()
+	# get config
 	config = get_config(config_path, prefix, suffix, version)
-	odv_level_items = get_all_items_odv_level(config)
-	config_profile_list_file = update_config_profile_list_file_from_config(config_profile_list_file, config)
-
+	# updates from config
+	mobileconfig_path = update_mobileconfig_path(mobileconfig_path, config)
+	# prep summary
+	script_summary = {"items_made":[], "config_items_made":[], "items_skipped":[], "rules_no_fix":[]}
+	# import classes
+	mscp_imports(mscp_path, custom_path)
+	# output dir
 	prep_munki_item_dir(output_path)
 
-	if baseline_path:
-		baseline = read_yaml(baseline_path)
-		check_baseline_defaults(baseline, config)
-		profile = get_baseline_profile(baseline, baseline_path)
-		for section in profile:
-			if "rules" not in section or type(section["rules"]) != list:
-				logging.error(f"Unexpected configuration of baseline file {baseline_path} rules not found where expected")
-				sys.exit(1)
-			rules = section["rules"] 
-			for rule_name in rules:
-				process_rule(rule_name, rules_path, output_path, config, odv_level_items, custom_path, separate_fix, include_echo, config_profile_list_file, script_summary)
-
-	else:
-		process_all_rules(rules_path, output_path, config, odv_level_items, custom_path, separate_fix, include_echo, config_profile_list_file, script_summary)
-
+	# process relevant rules
+	logging.info("Loading baseline...")
+	baseline = Baseline.from_yaml(pathlib.Path(baseline_path), custom=True)
+	logging.info("Successfully loaded baseline.")
+	print("\n")
+	for profile in baseline.profile:
+		for rule in profile.rules:
+			process_rule(rule, config, separate_fix, include_echo, mobileconfig_path, output_path, script_summary)
+	# summarise job
+	print("\n")
 	write_md_file(md_path, script_summary)
+	logging.info(f"{len(script_summary['items_made'])} item(s) generated to {output_path}")
+	logging.info(f"See {md_path} for a summary of the run.")
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
 	main()
